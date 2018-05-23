@@ -1,0 +1,29 @@
+[package]
+name = "async-bincode"
+version = "0.1.0"
+
+description = "Asynchronous access to a bincode-encoded item stream."
+readme = "README.md"
+
+authors = [
+	"Jon Gjengset <jon@thesquareplanet.com>",
+	"Jonathan Behrens <behrensj@mit.edu>"
+]
+
+homepage = "https://github.com/jonhoo/async-bincode"
+repository = "https://github.com/jonhoo/async-bincode.git"
+
+keywords = ["asynchronous", "tokio", "bincode", "serialization"]
+categories = ["asynchronous", "encoding", "network-programming"]
+
+license = "MIT/Apache-2.0"
+
+[badges]
+travis-ci = { repository = "jonhoo/async-bincode" }
+
+[dependencies]
+bincode = "1.0.0"
+byteorder = "1.0.0"
+futures = "0.1"
+serde = "1.0.8"
+tokio = "0.1"
