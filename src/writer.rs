@@ -16,7 +16,7 @@ use tokio::prelude::*;
 /// the serialized data). The default is [`SyncDestination`], but these can be easily toggled
 /// between using [`AsyncBincodeWriter::for_async`].
 #[derive(Debug)]
-pub struct AsyncBincodeWriter<W, T, D = SyncDestination> {
+pub struct AsyncBincodeWriter<W, T, D> {
     writer: W,
     written: usize,
     buffer: Vec<u8>,
@@ -24,7 +24,7 @@ pub struct AsyncBincodeWriter<W, T, D = SyncDestination> {
     dest: PhantomData<D>,
 }
 
-impl<W, T, D> Default for AsyncBincodeWriter<W, T, D>
+impl<W, T> Default for AsyncBincodeWriter<W, T, SyncDestination>
 where
     W: Default,
 {
@@ -56,7 +56,7 @@ impl<W, T, D> AsyncBincodeWriter<W, T, D> {
     }
 }
 
-impl<W, T, D> From<W> for AsyncBincodeWriter<W, T, D> {
+impl<W, T> From<W> for AsyncBincodeWriter<W, T, SyncDestination> {
     fn from(writer: W) -> Self {
         AsyncBincodeWriter {
             buffer: Vec::new(),
