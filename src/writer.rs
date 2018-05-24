@@ -13,9 +13,10 @@ use tokio::prelude::*;
 ///
 /// Note that an `AsyncBincodeWriter` is must be of the type [`AsyncDestination`] in order to be
 /// compatible with [`AsyncBincodeReader`] (recall that it requires the serialized size prefixed to
-/// the serialized data).
+/// the serialized data). The default is [`SyncDestination`], but these can be easily toggled
+/// between using [`AsyncBincodeWriter::for_async`].
 #[derive(Debug)]
-pub struct AsyncBincodeWriter<W, T, D> {
+pub struct AsyncBincodeWriter<W, T, D = SyncDestination> {
     writer: W,
     written: usize,
     buffer: Vec<u8>,
