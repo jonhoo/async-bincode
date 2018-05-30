@@ -18,8 +18,8 @@ use tokio::prelude::*;
 #[derive(Debug)]
 pub struct AsyncBincodeWriter<W, T, D> {
     writer: W,
-    written: usize,
-    buffer: Vec<u8>,
+    pub(crate) written: usize,
+    pub(crate) buffer: Vec<u8>,
     from: PhantomData<T>,
     dest: PhantomData<D>,
 }
@@ -68,11 +68,17 @@ impl<W, T> From<W> for AsyncBincodeWriter<W, T, SyncDestination> {
     }
 }
 
-impl<W, T, D> AsyncBincodeWriter<W, T, D> {
+impl<W, T> AsyncBincodeWriter<W, T, SyncDestination> {
     /// Make this writer include the serialized data's size before each serialized value.
     ///
     /// This is necessary for compatability with [`AsyncBincodeReader`].
     pub fn for_async(self) -> AsyncBincodeWriter<W, T, AsyncDestination> {
+        self.make_for()
+    }
+}
+
+impl<W, T, D> AsyncBincodeWriter<W, T, D> {
+    pub(crate) fn make_for<D2>(self) -> AsyncBincodeWriter<W, T, D2> {
         AsyncBincodeWriter {
             buffer: self.buffer,
             writer: self.writer,
@@ -81,18 +87,14 @@ impl<W, T, D> AsyncBincodeWriter<W, T, D> {
             dest: PhantomData,
         }
     }
+}
 
+impl<W, T> AsyncBincodeWriter<W, T, AsyncDestination> {
     /// Make this writer only send bincode-encoded values.
     ///
     /// This is necessary for compatability with stock `bincode` receivers.
     pub fn for_sync(self) -> AsyncBincodeWriter<W, T, SyncDestination> {
-        AsyncBincodeWriter {
-            buffer: self.buffer,
-            writer: self.writer,
-            written: self.written,
-            from: self.from,
-            dest: PhantomData,
-        }
+        self.make_for()
     }
 }
 

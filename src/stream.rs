@@ -94,23 +94,35 @@ impl<S, R, W, D> AsyncBincodeStream<S, R, W, D> {
     /// Split this async stream into a write half and a read half.
     ///
     /// Any partially sent or received state is preserved.
-    pub fn split(mut self) -> (AsyncBincodeWriter<S, W, D>, AsyncBincodeReader<S, R>)
+    pub fn split(
+        mut self,
+    ) -> (
+        AsyncBincodeReader<tokio::io::ReadHalf<S>, R>,
+        AsyncBincodeWriter<tokio::io::WriteHalf<S>, W, D>,
+    )
     where
-        S: Clone,
+        S: AsyncRead + AsyncWrite,
     {
         // First, steal the reader state so it isn't lost
         let rbuff = self.stream.buffer.split_off(0);
-        let size = self.stream.size;
+        let rsize = self.stream.size;
         // Then, fish out the writer
-        let writer = self.stream.into_inner().0;
-        // Now clone the stream for the reader
-        let stream = writer.get_ref().clone();
+        let mut writer = self.stream.into_inner().0;
+        // And steal the writer state so it isn't lost
+        let wbuff = writer.buffer.split_off(0);
+        let wsize = writer.written;
+        // Now split the stream
+        let (r, w) = writer.into_inner().split();
         // Then put the reader back together
-        let mut reader = AsyncBincodeReader::from(stream);
+        let mut reader = AsyncBincodeReader::from(r);
         reader.buffer = rbuff;
-        reader.size = size;
+        reader.size = rsize;
+        // And then the writer
+        let mut writer: AsyncBincodeWriter<_, _, D> = AsyncBincodeWriter::from(w).make_for();
+        writer.buffer = wbuff;
+        writer.written = wsize;
         // All good!
-        (writer, reader)
+        (reader, writer)
     }
 }
 
