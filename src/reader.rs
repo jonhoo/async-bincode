@@ -18,8 +18,8 @@ use tokio::prelude::*;
 #[derive(Debug)]
 pub struct AsyncBincodeReader<R, T> {
     reader: R,
-    buffer: Vec<u8>,
-    size: usize,
+    pub(crate) buffer: Vec<u8>,
+    pub(crate) size: usize,
     into: PhantomData<T>,
 }
 

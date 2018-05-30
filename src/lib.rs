@@ -22,9 +22,11 @@ extern crate futures;
 extern crate tokio;
 
 mod reader;
+mod stream;
 mod writer;
 
 pub use reader::AsyncBincodeReader;
+pub use stream::AsyncBincodeStream;
 pub use writer::AsyncBincodeWriter;
 pub use writer::{AsyncDestination, BincodeWriterFor, SyncDestination};
 
