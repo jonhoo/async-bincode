@@ -1,11 +1,10 @@
 use bincode;
-use serde::{Deserialize, Serialize};
 use std::ops::{Deref, DerefMut};
 use std::{fmt, io};
 use tokio;
 use tokio::prelude::*;
 use {AsyncBincodeReader, AsyncBincodeWriter};
-use {AsyncDestination, BincodeWriterFor, SyncDestination};
+use {AsyncDestination, SyncDestination};
 
 /// A wrapper around an asynchronous stream that receives and sends bincode-encoded values.
 ///
@@ -22,7 +21,8 @@ pub struct AsyncBincodeStream<S, R, W, D> {
     stream: AsyncBincodeReader<InternalAsyncWriter<S, W, D>, R>,
 }
 
-struct InternalAsyncWriter<S, T, D>(AsyncBincodeWriter<S, T, D>);
+#[doc(hidden)]
+pub struct InternalAsyncWriter<S, T, D>(AsyncBincodeWriter<S, T, D>);
 
 impl<S: fmt::Debug, T, D> fmt::Debug for InternalAsyncWriter<S, T, D> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -141,8 +141,7 @@ impl<S, T, D> DerefMut for InternalAsyncWriter<S, T, D> {
 
 impl<S, R, W, D> Stream for AsyncBincodeStream<S, R, W, D>
 where
-    for<'a> R: Deserialize<'a>,
-    S: tokio::io::AsyncRead,
+    AsyncBincodeReader<InternalAsyncWriter<S, W, D>, R>: Stream<Item = R, Error = bincode::Error>,
 {
     type Item = R;
     type Error = bincode::Error;
@@ -153,9 +152,7 @@ where
 
 impl<S, R, W, D> Sink for AsyncBincodeStream<S, R, W, D>
 where
-    W: Serialize,
-    S: tokio::io::AsyncWrite,
-    AsyncBincodeWriter<S, W, D>: BincodeWriterFor<W>,
+    AsyncBincodeWriter<S, W, D>: Sink<SinkItem = W, SinkError = bincode::Error>,
 {
     type SinkItem = W;
     type SinkError = bincode::Error;
