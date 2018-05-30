@@ -18,11 +18,11 @@ use {AsyncDestination, BincodeWriterFor, SyncDestination};
 /// serialized size prefixed to the serialized data). The default is [`SyncDestination`], but these
 /// can be easily toggled between using [`AsyncBincodeStream::for_async`].
 #[derive(Debug)]
-pub struct AsyncBincodeStream<S, T, D> {
-    stream: AsyncBincodeReader<InternalAsyncWriter<S, T, D>, T>,
+pub struct AsyncBincodeStream<S, R, W, D> {
+    stream: AsyncBincodeReader<InternalAsyncWriter<S, W, D>, R>,
 }
 
-struct InternalAsyncWriter<W, T, D>(AsyncBincodeWriter<W, T, D>);
+struct InternalAsyncWriter<S, T, D>(AsyncBincodeWriter<S, T, D>);
 
 impl<S: fmt::Debug, T, D> fmt::Debug for InternalAsyncWriter<S, T, D> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -30,7 +30,7 @@ impl<S: fmt::Debug, T, D> fmt::Debug for InternalAsyncWriter<S, T, D> {
     }
 }
 
-impl<S, T> Default for AsyncBincodeStream<S, T, SyncDestination>
+impl<S, R, W> Default for AsyncBincodeStream<S, R, W, SyncDestination>
 where
     S: Default,
 {
@@ -39,7 +39,7 @@ where
     }
 }
 
-impl<S, T, D> AsyncBincodeStream<S, T, D> {
+impl<S, R, W, D> AsyncBincodeStream<S, R, W, D> {
     /// Gets a reference to the underlying stream.
     ///
     /// It is inadvisable to directly read from or write to the underlying stream.
@@ -63,7 +63,7 @@ impl<S, T, D> AsyncBincodeStream<S, T, D> {
     }
 }
 
-impl<S, T> From<S> for AsyncBincodeStream<S, T, SyncDestination> {
+impl<S, R, W> From<S> for AsyncBincodeStream<S, R, W, SyncDestination> {
     fn from(stream: S) -> Self {
         AsyncBincodeStream {
             stream: AsyncBincodeReader::from(InternalAsyncWriter(AsyncBincodeWriter::from(stream))),
@@ -71,11 +71,11 @@ impl<S, T> From<S> for AsyncBincodeStream<S, T, SyncDestination> {
     }
 }
 
-impl<S, T, D> AsyncBincodeStream<S, T, D> {
+impl<S, R, W, D> AsyncBincodeStream<S, R, W, D> {
     /// Make this stream include the serialized data's size before each serialized value.
     ///
     /// This is necessary for compatability with a remote [`AsyncBincodeReader`].
-    pub fn for_async(self) -> AsyncBincodeStream<S, T, AsyncDestination> {
+    pub fn for_async(self) -> AsyncBincodeStream<S, R, W, AsyncDestination> {
         let stream = self.into_inner();
         AsyncBincodeStream {
             stream: AsyncBincodeReader::from(InternalAsyncWriter(
@@ -87,14 +87,14 @@ impl<S, T, D> AsyncBincodeStream<S, T, D> {
     /// Make this stream only send bincode-encoded values.
     ///
     /// This is necessary for compatability with stock `bincode` receivers.
-    pub fn for_sync(self) -> AsyncBincodeStream<S, T, SyncDestination> {
+    pub fn for_sync(self) -> AsyncBincodeStream<S, R, W, SyncDestination> {
         AsyncBincodeStream::from(self.into_inner())
     }
 
     /// Split this async stream into a write half and a read half.
     ///
     /// Any partially sent or received state is preserved.
-    pub fn split(mut self) -> (AsyncBincodeWriter<S, T, D>, AsyncBincodeReader<S, T>)
+    pub fn split(mut self) -> (AsyncBincodeWriter<S, W, D>, AsyncBincodeReader<S, R>)
     where
         S: Clone,
     {
@@ -139,25 +139,25 @@ impl<S, T, D> DerefMut for InternalAsyncWriter<S, T, D> {
     }
 }
 
-impl<S, T, D> Stream for AsyncBincodeStream<S, T, D>
+impl<S, R, W, D> Stream for AsyncBincodeStream<S, R, W, D>
 where
-    for<'a> T: Deserialize<'a>,
+    for<'a> R: Deserialize<'a>,
     S: tokio::io::AsyncRead,
 {
-    type Item = T;
+    type Item = R;
     type Error = bincode::Error;
     fn poll(&mut self) -> Result<Async<Option<Self::Item>>, Self::Error> {
         self.stream.poll()
     }
 }
 
-impl<S, T, D> Sink for AsyncBincodeStream<S, T, D>
+impl<S, R, W, D> Sink for AsyncBincodeStream<S, R, W, D>
 where
-    T: Serialize,
+    W: Serialize,
     S: tokio::io::AsyncWrite,
-    AsyncBincodeWriter<S, T, D>: BincodeWriterFor<T>,
+    AsyncBincodeWriter<S, W, D>: BincodeWriterFor<W>,
 {
-    type SinkItem = T;
+    type SinkItem = W;
     type SinkError = bincode::Error;
 
     fn start_send(
