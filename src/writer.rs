@@ -167,6 +167,7 @@ where
         // we have to flush before we're really done
         if self.written == self.buffer.len() {
             self.buffer.clear();
+            self.written = 0;
             try_ready!(self.writer.poll_flush());
             Ok(Async::Ready(()))
         } else {
