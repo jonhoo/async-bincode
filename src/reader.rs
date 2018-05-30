@@ -6,10 +6,10 @@ use std::marker::PhantomData;
 use tokio;
 use tokio::prelude::*;
 
-/// An wrapper around an asynchronous reader that produces an asynchronous stream of
+/// A wrapper around an asynchronous reader that produces an asynchronous stream of
 /// bincode-decoded values.
 ///
-/// To use, provide a reader that implements `futures::AsyncRead`, and then use `futures::Stream`
+/// To use, provide a reader that implements `tokio::io::AsyncRead`, and then use `futures::Stream`
 /// to access the deserialized values.
 ///
 /// Note that the sender *must* prefix each serialized item with its size as reported by

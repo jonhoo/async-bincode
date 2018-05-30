@@ -5,16 +5,16 @@ use std::marker::PhantomData;
 use tokio;
 use tokio::prelude::*;
 
-/// An wrapper around an asynchronous sink that accepts, serializes, and sends bincode-encoded
+/// A wrapper around an asynchronous sink that accepts, serializes, and sends bincode-encoded
 /// values.
 ///
 /// To use, provide a writer that implements `futures::AsyncWrite`, and then use `futures::Sink`
 /// to send values.
 ///
-/// Note that an `AsyncBincodeWriter` is must be of the type [`AsyncDestination`] in order to be
-/// compatible with [`AsyncBincodeReader`] (recall that it requires the serialized size prefixed to
-/// the serialized data). The default is [`SyncDestination`], but these can be easily toggled
-/// between using [`AsyncBincodeWriter::for_async`].
+/// Note that an `AsyncBincodeWriter` must be of the type [`AsyncDestination`] in order to be
+/// compatible with an [`AsyncBincodeReader`] on the remote end (recall that it requires the
+/// serialized size prefixed to the serialized data). The default is [`SyncDestination`], but these
+/// can be easily toggled between using [`AsyncBincodeWriter::for_async`].
 #[derive(Debug)]
 pub struct AsyncBincodeWriter<W, T, D> {
     writer: W,
@@ -48,7 +48,7 @@ impl<W, T, D> AsyncBincodeWriter<W, T, D> {
         &mut self.writer
     }
 
-    /// Unwraps this `AsyncBincodeWriter`, returning the underlying writr.
+    /// Unwraps this `AsyncBincodeWriter`, returning the underlying writer.
     ///
     /// Note that any leftover serialized data that has not yet been sent is lost.
     pub fn into_inner(self) -> W {
