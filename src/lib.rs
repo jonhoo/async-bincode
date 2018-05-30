@@ -46,3 +46,43 @@ where
     writer.write_u32::<NetworkEndian>(size)?;
     c.serialize_into(writer, value)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use futures::{Future, Sink, Stream};
+    use std::net::SocketAddr;
+    use std::thread;
+
+    #[test]
+    fn it_works() {
+        let echo = tokio::net::TcpListener::bind(&SocketAddr::new("127.0.0.1".parse().unwrap(), 0))
+            .unwrap();
+        let addr = echo.local_addr().unwrap();
+
+        let jh = thread::spawn(move || {
+            tokio::run(
+                echo.incoming()
+                    .map_err(bincode::Error::from)
+                    .take(1)
+                    .for_each(|stream| {
+                        let (r, w) = AsyncBincodeStream::<_, usize, usize, _>::from(stream)
+                            .for_async()
+                            .split();
+                        r.forward(w).map(|_| ())
+                    })
+                    .map_err(|e| panic!(e)),
+            )
+        });
+
+        let client = tokio::net::TcpStream::connect(&addr).wait().unwrap();
+        let client = AsyncBincodeStream::from(client).for_async();
+        let client = client.send(42usize).wait().unwrap();
+        let (got, _) = match client.into_future().wait() {
+            Ok(x) => x,
+            Err((e, _)) => panic!(e),
+        };
+        assert_eq!(got, Some(42usize));
+        jh.join().unwrap();
+    }
+}
