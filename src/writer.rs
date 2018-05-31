@@ -98,10 +98,12 @@ impl<W, T> AsyncBincodeWriter<W, T, AsyncDestination> {
     }
 }
 
-#[doc(hidden)]
+/// A marker that indicates that the wrapping type is compatible with `AsyncBincodeReader`.
+#[derive(Debug)]
 pub struct AsyncDestination;
 
-#[doc(hidden)]
+/// A marker that indicates that the wrapping type is compatible with stock `bincode` receivers.
+#[derive(Debug)]
 pub struct SyncDestination;
 
 #[doc(hidden)]

@@ -78,11 +78,20 @@ mod tests {
         let client = tokio::net::TcpStream::connect(&addr).wait().unwrap();
         let client = AsyncBincodeStream::from(client).for_async();
         let client = client.send(42usize).wait().unwrap();
-        let (got, _) = match client.into_future().wait() {
+        let (got, client) = match client.into_future().wait() {
             Ok(x) => x,
             Err((e, _)) => panic!(e),
         };
         assert_eq!(got, Some(42usize));
+
+        let client = client.send(44usize).wait().unwrap();
+        let (got, client) = match client.into_future().wait() {
+            Ok(x) => x,
+            Err((e, _)) => panic!(e),
+        };
+        assert_eq!(got, Some(44usize));
+
+        drop(client);
         jh.join().unwrap();
     }
 }
