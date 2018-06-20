@@ -41,7 +41,8 @@ where
     W: std::io::Write,
     T: serde::Serialize,
 {
-    let c = bincode::config();
+    let mut c = bincode::config();
+    let c = c.limit(u32::max_value() as u64);
     let size = c.serialized_size(value)? as u32;
     writer.write_u32::<NetworkEndian>(size)?;
     c.serialize_into(writer, value)
