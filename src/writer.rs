@@ -162,19 +162,14 @@ where
 
     fn poll_complete(&mut self) -> Result<Async<()>, Self::SinkError> {
         // write stuff out if we need to
-        if self.written != self.buffer.len() {
+        while self.written != self.buffer.len() {
             let n = try_ready!(self.writer.poll_write(&self.buffer[self.written..]));
             self.written += n;
         }
 
         // we have to flush before we're really done
-        if self.written == self.buffer.len() {
-            self.buffer.clear();
-            self.written = 0;
-            try_ready!(self.writer.poll_flush());
-            Ok(Async::Ready(()))
-        } else {
-            Ok(Async::NotReady)
-        }
+        self.buffer.clear();
+        self.written = 0;
+        self.writer.poll_flush().map_err(bincode::Error::from)
     }
 }
