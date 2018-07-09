@@ -95,4 +95,49 @@ mod tests {
         drop(client);
         jh.join().unwrap();
     }
+
+    #[test]
+    fn it_works_spawn() {
+        let echo = tokio::net::TcpListener::bind(&SocketAddr::new("127.0.0.1".parse().unwrap(), 0))
+            .unwrap();
+        let addr = echo.local_addr().unwrap();
+
+        let jh = thread::spawn(move || {
+            let mut rt = tokio::runtime::Runtime::new().unwrap();
+            let (tx, rx) = futures::sync::mpsc::unbounded();
+
+            let client = ::std::net::TcpStream::connect(&addr).unwrap();
+            let client =
+                tokio::net::TcpStream::from_std(client, &tokio::reactor::Handle::default())
+                    .map(AsyncBincodeWriter::from)
+                    .map(AsyncBincodeWriter::for_async)
+                    .unwrap();
+
+            rt.spawn(
+                rx.forward(client.sink_map_err(|e| panic!("{:?}", e)))
+                    .map(|_| ()),
+            );
+            tx.unbounded_send(42usize).unwrap();
+            tx.unbounded_send(42usize).unwrap();
+            rt.shutdown_on_idle();
+        });
+
+        tokio::run(
+            echo.incoming()
+                .map_err(bincode::Error::from)
+                .take(1)
+                .for_each(|stream| {
+                    let (r, w) = AsyncBincodeStream::<_, usize, usize, _>::from(stream)
+                        .for_async()
+                        .split();
+                    r.inspect(|&v| {
+                        assert_eq!(v, 42usize);
+                    }).forward(w)
+                        .map(|_| ())
+                })
+                .map_err(|e| panic!(e)),
+        );
+
+        jh.join().unwrap();
+    }
 }
