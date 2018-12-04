@@ -1,6 +1,6 @@
 [package]
 name = "async-bincode"
-version = "0.4.5"
+version = "0.4.6"
 
 description = "Asynchronous access to a bincode-encoded item stream."
 readme = "README.md"
@@ -20,6 +20,7 @@ license = "MIT/Apache-2.0"
 
 [badges]
 travis-ci = { repository = "jonhoo/async-bincode" }
+maintenance = { status = "passively-maintained" }
 
 [dependencies]
 bincode = "1.0.0"
