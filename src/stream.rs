@@ -126,11 +126,7 @@ impl<S, R, W, D> AsyncBincodeStream<S, R, W, D> {
     }
 }
 
-impl<S, T, D> tokio::io::AsyncRead for InternalAsyncWriter<S, T, D>
-where
-    S: tokio::io::AsyncRead,
-{
-}
+impl<S, T, D> tokio::io::AsyncRead for InternalAsyncWriter<S, T, D> where S: tokio::io::AsyncRead {}
 impl<S, T, D> io::Read for InternalAsyncWriter<S, T, D>
 where
     S: Read,

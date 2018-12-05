@@ -132,10 +132,11 @@ mod tests {
                         .split();
                     r.inspect(|&v| {
                         assert_eq!(v, 42usize);
-                    }).forward(w)
-                        .map(|_| ())
+                    })
+                    .forward(w)
+                    .map(|_| ())
                 })
-                .map_err(|e| panic!(e)),
+                .map_err(|e| panic!("{:?}", e)),
         );
 
         jh.join().unwrap();
