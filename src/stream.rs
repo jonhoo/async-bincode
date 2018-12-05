@@ -104,8 +104,7 @@ impl<S, R, W, D> AsyncBincodeStream<S, R, W, D> {
         S: AsyncRead + AsyncWrite,
     {
         // First, steal the reader state so it isn't lost
-        let rbuff = self.stream.buffer.split_off(0);
-        let rsize = self.stream.size;
+        let rbuff = self.stream.buffer.take();
         // Then, fish out the writer
         let mut writer = self.stream.into_inner().0;
         // And steal the writer state so it isn't lost
@@ -116,7 +115,6 @@ impl<S, R, W, D> AsyncBincodeStream<S, R, W, D> {
         // Then put the reader back together
         let mut reader = AsyncBincodeReader::from(r);
         reader.buffer = rbuff;
-        reader.size = rsize;
         // And then the writer
         let mut writer: AsyncBincodeWriter<_, _, D> = AsyncBincodeWriter::from(w).make_for();
         writer.buffer = wbuff;

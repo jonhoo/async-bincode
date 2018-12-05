@@ -1,5 +1,6 @@
 use bincode;
 use byteorder::{ByteOrder, NetworkEndian};
+use bytes::BytesMut;
 use serde::Deserialize;
 use std::io;
 use std::marker::PhantomData;
@@ -18,8 +19,7 @@ use tokio::prelude::*;
 #[derive(Debug)]
 pub struct AsyncBincodeReader<R, T> {
     reader: R,
-    pub(crate) buffer: Vec<u8>,
-    pub(crate) size: usize,
+    pub(crate) buffer: BytesMut,
     into: PhantomData<T>,
 }
 
@@ -65,8 +65,7 @@ impl<R, T> AsyncBincodeReader<R, T> {
 impl<R, T> From<R> for AsyncBincodeReader<R, T> {
     fn from(reader: R) -> Self {
         AsyncBincodeReader {
-            buffer: Vec::new(),
-            size: 0,
+            buffer: Default::default(),
             reader,
             into: PhantomData,
         }
@@ -81,20 +80,21 @@ where
     type Item = T;
     type Error = bincode::Error;
     fn poll(&mut self) -> Result<Async<Option<Self::Item>>, Self::Error> {
-        if self.size < 4 {
-            if let FillResult::EOF = try_ready!(self.fill(5).map_err(bincode::Error::from)) {
-                return Ok(Async::Ready(None));
-            }
+        if let FillResult::EOF = try_ready!(self.fill(5).map_err(bincode::Error::from)) {
+            return Ok(Async::Ready(None));
         }
 
-        let message_size: u32 = NetworkEndian::read_u32(&self.buffer[0..4]);
-        let target_buffer_size = message_size as usize + 4;
+        let message_size: u32 = NetworkEndian::read_u32(&self.buffer[..4]);
+        let target_buffer_size = message_size as usize;
 
-        // since self.size >= 4, we know that we can't get an clean EOF here
-        try_ready!(self.fill(target_buffer_size).map_err(bincode::Error::from));
+        // since self.buffer.len() >= 4, we know that we can't get an clean EOF here
+        try_ready!(self
+            .fill(target_buffer_size + 4)
+            .map_err(bincode::Error::from));
 
-        let message = bincode::deserialize(&self.buffer[4..target_buffer_size])?;
-        self.size = 0;
+        self.buffer.advance(4);
+        let message = bincode::deserialize(&self.buffer[..target_buffer_size])?;
+        self.buffer.advance(target_buffer_size);
         Ok(Async::Ready(Some(message)))
     }
 }
@@ -110,24 +110,38 @@ where
     R: tokio::io::AsyncRead,
 {
     fn fill(&mut self, target_size: usize) -> Result<Async<FillResult>, tokio::io::Error> {
-        if self.buffer.len() < target_size {
-            self.buffer.resize(target_size, 0u8);
+        if self.buffer.len() >= target_size {
+            // we already have the bytes we need!
+            return Ok(Async::Ready(FillResult::Filled));
         }
 
-        while self.size < target_size {
-            let n = try_ready!(
-                self.reader
-                    .poll_read(&mut self.buffer[self.size..target_size])
-            );
+        // make sure we can fit all the data we're about to read
+        if self.buffer.capacity() < target_size {
+            let missing = target_size - self.buffer.capacity();
+            self.buffer.reserve(missing);
+        }
+
+        let had = self.buffer.len();
+        // this is the bit we'll be reading into
+        let mut rest = self.buffer.split_off(had);
+        let missing = target_size - self.buffer.len();
+        rest.resize(missing, 0);
+
+        while self.buffer.len() < target_size {
+            let n = try_ready!(self.reader.poll_read(&mut rest[..]));
             if n == 0 {
-                if self.size == 0 {
+                if self.buffer.len() == 0 {
                     return Ok(Async::Ready(FillResult::EOF));
                 } else {
                     return Err(tokio::io::Error::from(io::ErrorKind::BrokenPipe));
                 }
             }
-            self.size += n;
+
+            // adopt the new bytes
+            let read = rest.split_to(n);
+            self.buffer.unsplit(read);
         }
+
         Ok(Async::Ready(FillResult::Filled))
     }
 }

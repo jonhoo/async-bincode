@@ -19,6 +19,7 @@ extern crate byteorder;
 extern crate serde;
 #[macro_use]
 extern crate futures;
+extern crate bytes;
 extern crate tokio;
 
 mod reader;

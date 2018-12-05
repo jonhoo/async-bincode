@@ -1,6 +1,6 @@
 [package]
 name = "async-bincode"
-version = "0.4.6"
+version = "0.4.7"
 
 description = "Asynchronous access to a bincode-encoded item stream."
 readme = "README.md"
@@ -28,3 +28,4 @@ byteorder = "1.0.0"
 futures = "0.1"
 serde = "1.0.8"
 tokio = "0.1"
+bytes = "0.4.11"
