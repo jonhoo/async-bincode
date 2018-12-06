@@ -65,7 +65,7 @@ impl<R, T> AsyncBincodeReader<R, T> {
 impl<R, T> From<R> for AsyncBincodeReader<R, T> {
     fn from(reader: R) -> Self {
         AsyncBincodeReader {
-            buffer: Default::default(),
+            buffer: BytesMut::with_capacity(8192),
             reader,
             into: PhantomData,
         }
@@ -118,10 +118,7 @@ where
         // make sure we can fit all the data we're about to read
         // and then some, so we don't do a gazillion syscalls
         if self.buffer.capacity() < target_size {
-            let mut missing = target_size - self.buffer.capacity();
-            if target_size < 8_192 {
-                missing = 8_192 - self.buffer.capacity();
-            }
+            let missing = target_size - self.buffer.capacity();
             self.buffer.reserve(missing);
         }
 
@@ -130,8 +127,8 @@ where
         let mut rest = self.buffer.split_off(had);
         // this is safe because we're not extending beyond the reserved capacity
         // and we're never reading unwritten bytes
-        let missing = target_size - had;
-        unsafe { rest.set_len(missing) };
+        let max = rest.capacity();
+        unsafe { rest.set_len(max) };
 
         while self.buffer.len() < target_size {
             let n = try_ready!(self.reader.poll_read(&mut rest[..]));

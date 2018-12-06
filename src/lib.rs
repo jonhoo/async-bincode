@@ -142,4 +142,46 @@ mod tests {
 
         jh.join().unwrap();
     }
+
+    #[test]
+    fn lots() {
+        let echo = tokio::net::TcpListener::bind(&SocketAddr::new("127.0.0.1".parse().unwrap(), 0))
+            .unwrap();
+        let addr = echo.local_addr().unwrap();
+
+        let jh = thread::spawn(move || {
+            tokio::run(
+                echo.incoming()
+                    .map_err(bincode::Error::from)
+                    .take(1)
+                    .for_each(|stream| {
+                        let (r, w) = AsyncBincodeStream::<_, usize, usize, _>::from(stream)
+                            .for_async()
+                            .split();
+                        r.forward(w).map(|_| ())
+                    })
+                    .map_err(|e| panic!(e)),
+            )
+        });
+
+        let n = 81920;
+        tokio::run(
+            tokio::net::TcpStream::connect(&addr)
+                .map_err(bincode::Error::from)
+                .map(|stream| AsyncBincodeStream::from(stream).for_async())
+                .and_then(move |c| futures::stream::iter_ok(0usize..n).forward(c))
+                .and_then(|(_, mut c)| {
+                    c.get_mut().shutdown(std::net::Shutdown::Write).unwrap();
+                    c.fold(0, |at, got| -> Result<usize, bincode::Error> {
+                        assert_eq!(at, got);
+                        Ok(at + 1)
+                    })
+                })
+                .map(move |v: usize| {
+                    assert_eq!(v, n);
+                })
+                .map_err(|e| panic!("{:?}", e)),
+        );
+        jh.join().unwrap();
+    }
 }
