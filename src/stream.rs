@@ -3,8 +3,8 @@ use std::ops::{Deref, DerefMut};
 use std::{fmt, io};
 use tokio;
 use tokio::prelude::*;
-use {AsyncBincodeReader, AsyncBincodeWriter};
-use {AsyncDestination, SyncDestination};
+use crate::{AsyncBincodeReader, AsyncBincodeWriter};
+use crate::{AsyncDestination, SyncDestination};
 
 /// A wrapper around an asynchronous stream that receives and sends bincode-encoded values.
 ///

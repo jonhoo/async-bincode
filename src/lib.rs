@@ -12,24 +12,18 @@
 //! On the write side, `async-bincode` buffers the serialized values, and asynchronously sends the
 //! resulting bytestream.
 #![deny(missing_docs)]
-#![deny(unused_extern_crates)]
 
-extern crate bincode;
-extern crate byteorder;
-extern crate serde;
 #[macro_use]
 extern crate futures;
-extern crate bytes;
-extern crate tokio;
 
 mod reader;
 mod stream;
 mod writer;
 
-pub use reader::AsyncBincodeReader;
-pub use stream::AsyncBincodeStream;
-pub use writer::AsyncBincodeWriter;
-pub use writer::{AsyncDestination, BincodeWriterFor, SyncDestination};
+pub use crate::reader::AsyncBincodeReader;
+pub use crate::stream::AsyncBincodeStream;
+pub use crate::writer::AsyncBincodeWriter;
+pub use crate::writer::{AsyncDestination, BincodeWriterFor, SyncDestination};
 
 use byteorder::{NetworkEndian, WriteBytesExt};
 
