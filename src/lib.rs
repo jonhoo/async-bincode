@@ -12,9 +12,7 @@
 //! On the write side, `async-bincode` buffers the serialized values, and asynchronously sends the
 //! resulting bytestream.
 #![deny(missing_docs)]
-
-#[macro_use]
-extern crate futures;
+#![feature(async_await)]
 
 mod reader;
 mod stream;
@@ -46,136 +44,65 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use futures::{Future, Sink, Stream};
     use std::net::SocketAddr;
-    use std::thread;
+    use tokio::prelude::*;
 
-    #[test]
-    fn it_works() {
-        let echo = tokio::net::TcpListener::bind(&SocketAddr::new("127.0.0.1".parse().unwrap(), 0))
+    #[tokio::test]
+    async fn it_works() {
+        let mut echo = tokio::net::TcpListener::bind(&SocketAddr::new("127.0.0.1".parse().unwrap(), 0))
             .unwrap();
         let addr = echo.local_addr().unwrap();
 
-        let jh = thread::spawn(move || {
-            tokio::run(
-                echo.incoming()
-                    .map_err(bincode::Error::from)
-                    .take(1)
-                    .for_each(|stream| {
-                        let (r, w) = AsyncBincodeStream::<_, usize, usize, _>::from(stream)
-                            .for_async()
-                            .split();
-                        r.forward(w).map(|_| ())
-                    })
-                    .map_err(|e| panic!(e)),
-            )
-        });
+        tokio::spawn(
+            async move {
+                let (stream, _) = echo.accept().await.unwrap();
+                let (r, w) = AsyncBincodeStream::<_, usize, usize, _>::from(stream)
+                    .for_async()
+                    .split();
+                r.forward(w).await.unwrap();
+            }
+        );
 
-        let client = tokio::net::TcpStream::connect(&addr).wait().unwrap();
-        let client = AsyncBincodeStream::from(client).for_async();
-        let client = client.send(42usize).wait().unwrap();
-        let (got, client) = match client.into_future().wait() {
-            Ok(x) => x,
-            Err((e, _)) => panic!(e),
-        };
-        assert_eq!(got, Some(42usize));
+        let client = tokio::net::TcpStream::connect(&addr).await.unwrap();
+        let mut client = AsyncBincodeStream::<_, usize, usize, _>::from(client).for_async();
+        client.send(42).await.unwrap();
+        assert_eq!(client.next().await.unwrap().unwrap(), 42);
 
-        let client = client.send(44usize).wait().unwrap();
-        let (got, client) = match client.into_future().wait() {
-            Ok(x) => x,
-            Err((e, _)) => panic!(e),
-        };
-        assert_eq!(got, Some(44usize));
+        client.send(44).await.unwrap();
+        assert_eq!(client.next().await.unwrap().unwrap(), 44);
 
         drop(client);
-        jh.join().unwrap();
     }
 
-    #[test]
-    fn it_works_spawn() {
-        let echo = tokio::net::TcpListener::bind(&SocketAddr::new("127.0.0.1".parse().unwrap(), 0))
+    #[tokio::test]
+    async fn lots() {
+        let mut echo = tokio::net::TcpListener::bind(&SocketAddr::new("127.0.0.1".parse().unwrap(), 0))
             .unwrap();
         let addr = echo.local_addr().unwrap();
 
-        let jh = thread::spawn(move || {
-            let mut rt = tokio::runtime::Runtime::new().unwrap();
-            let (tx, rx) = futures::sync::mpsc::unbounded();
-
-            let client = ::std::net::TcpStream::connect(&addr).unwrap();
-            let client =
-                tokio::net::TcpStream::from_std(client, &tokio::reactor::Handle::default())
-                    .map(AsyncBincodeWriter::from)
-                    .map(AsyncBincodeWriter::for_async)
-                    .unwrap();
-
-            rt.spawn(
-                rx.forward(client.sink_map_err(|e| panic!("{:?}", e)))
-                    .map(|_| ()),
-            );
-            tx.unbounded_send(42usize).unwrap();
-            tx.unbounded_send(42usize).unwrap();
-            rt.shutdown_on_idle();
-        });
-
-        tokio::run(
-            echo.incoming()
-                .map_err(bincode::Error::from)
-                .take(1)
-                .for_each(|stream| {
-                    let (r, w) = AsyncBincodeStream::<_, usize, usize, _>::from(stream)
-                        .for_async()
-                        .split();
-                    r.inspect(|&v| {
-                        assert_eq!(v, 42usize);
-                    })
-                    .forward(w)
-                    .map(|_| ())
-                })
-                .map_err(|e| panic!("{:?}", e)),
+        tokio::spawn(
+            async move {
+                let (stream, _) = echo.accept().await.unwrap();
+                let (r, w) = AsyncBincodeStream::<_, usize, usize, _>::from(stream)
+                    .for_async()
+                    .split();
+                r.forward(w).await.unwrap();
+            }
         );
-
-        jh.join().unwrap();
-    }
-
-    #[test]
-    fn lots() {
-        let echo = tokio::net::TcpListener::bind(&SocketAddr::new("127.0.0.1".parse().unwrap(), 0))
-            .unwrap();
-        let addr = echo.local_addr().unwrap();
-
-        let jh = thread::spawn(move || {
-            tokio::run(
-                echo.incoming()
-                    .map_err(bincode::Error::from)
-                    .take(1)
-                    .for_each(|stream| {
-                        let (r, w) = AsyncBincodeStream::<_, usize, usize, _>::from(stream)
-                            .for_async()
-                            .split();
-                        r.forward(w).map(|_| ())
-                    })
-                    .map_err(|e| panic!(e)),
-            )
-        });
 
         let n = 81920;
-        tokio::run(
-            tokio::net::TcpStream::connect(&addr)
-                .map_err(bincode::Error::from)
-                .map(|stream| AsyncBincodeStream::from(stream).for_async())
-                .and_then(move |c| futures::stream::iter_ok(0usize..n).forward(c))
-                .and_then(|(_, mut c)| {
-                    c.get_mut().shutdown(std::net::Shutdown::Write).unwrap();
-                    c.fold(0, |at, got| -> Result<usize, bincode::Error> {
-                        assert_eq!(at, got);
-                        Ok(at + 1)
-                    })
-                })
-                .map(move |v: usize| {
-                    assert_eq!(v, n);
-                })
-                .map_err(|e| panic!("{:?}", e)),
-        );
-        jh.join().unwrap();
+        let stream = tokio::net::TcpStream::connect(&addr).await.unwrap();
+        let mut c = AsyncBincodeStream::from(stream).for_async();
+
+        futures::stream::iter(0usize..n).map(Ok).forward(&mut c).await.unwrap();
+
+        tokio::net::tcp::TcpStream::shutdown(c.get_mut(), std::net::Shutdown::Write).unwrap();
+
+        let mut at = 0;
+        while let Some(got) = c.next().await.transpose().unwrap() {
+            assert_eq!(at, got);
+            at += 1;
+        }
+        assert_eq!(at, n);
     }
 }

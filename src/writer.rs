@@ -1,7 +1,10 @@
 use bincode;
 use byteorder::{NetworkEndian, WriteBytesExt};
+use futures_core::ready;
 use serde::Serialize;
 use std::marker::PhantomData;
+use std::pin::Pin;
+use std::task::{Context, Poll};
 use tokio;
 use tokio::prelude::*;
 
@@ -23,6 +26,8 @@ pub struct AsyncBincodeWriter<W, T, D> {
     from: PhantomData<T>,
     dest: PhantomData<D>,
 }
+
+impl<W, T, D> Unpin for AsyncBincodeWriter<W, T, D> where W: Unpin {}
 
 impl<W, T> Default for AsyncBincodeWriter<W, T, SyncDestination>
 where
@@ -133,19 +138,19 @@ where
     }
 }
 
-impl<W, T, D> Sink for AsyncBincodeWriter<W, T, D>
+impl<W, T, D> Sink<T> for AsyncBincodeWriter<W, T, D>
 where
     T: Serialize,
-    W: tokio::io::AsyncWrite,
+    W: AsyncWrite + Unpin,
     Self: BincodeWriterFor<T>,
 {
-    type SinkItem = T;
-    type SinkError = bincode::Error;
+    type Error = bincode::Error;
 
-    fn start_send(
-        &mut self,
-        item: Self::SinkItem,
-    ) -> Result<AsyncSink<Self::SinkItem>, Self::SinkError> {
+    fn poll_ready(self: Pin<&mut Self>, _: &mut Context) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
+    }
+
+    fn start_send(mut self: Pin<&mut Self>, item: T) -> Result<(), Self::Error> {
         if self.buffer.is_empty() {
             // NOTE: in theory we could have a short-circuit here that tries to have bincode write
             // directly into self.writer. this would be way more efficient in the common case as we
@@ -157,19 +162,32 @@ where
         }
 
         self.append(item)?;
-        Ok(AsyncSink::Ready)
+        Ok(())
     }
 
-    fn poll_complete(&mut self) -> Result<Async<()>, Self::SinkError> {
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Result<(), Self::Error>> {
+        // allow us to borrow fields separately
+        let this = self.get_mut();
+
         // write stuff out if we need to
-        while self.written != self.buffer.len() {
-            let n = try_ready!(self.writer.poll_write(&self.buffer[self.written..]));
-            self.written += n;
+        while this.written != this.buffer.len() {
+            let n =
+                ready!(Pin::new(&mut this.writer).poll_write(cx, &this.buffer[this.written..]))?;
+            this.written += n;
         }
 
         // we have to flush before we're really done
-        self.buffer.clear();
-        self.written = 0;
-        self.writer.poll_flush().map_err(bincode::Error::from)
+        this.buffer.clear();
+        this.written = 0;
+        Pin::new(&mut this.writer)
+            .poll_flush(cx)
+            .map_err(bincode::Error::from)
+    }
+
+    fn poll_close(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Result<(), Self::Error>> {
+        ready!(self.as_mut().poll_flush(cx))?;
+        Pin::new(&mut self.writer)
+            .poll_shutdown(cx)
+            .map_err(bincode::Error::from)
     }
 }
