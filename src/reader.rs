@@ -1,9 +1,12 @@
 use bincode;
 use byteorder::{ByteOrder, NetworkEndian};
 use bytes::BytesMut;
+use futures_core::ready;
 use serde::Deserialize;
 use std::io;
 use std::marker::PhantomData;
+use std::pin::Pin;
+use std::task::{Context, Poll};
 use tokio;
 use tokio::prelude::*;
 
@@ -22,6 +25,8 @@ pub struct AsyncBincodeReader<R, T> {
     pub(crate) buffer: BytesMut,
     into: PhantomData<T>,
 }
+
+impl<R, T> Unpin for AsyncBincodeReader<R, T> where R: Unpin {}
 
 impl<R, T> Default for AsyncBincodeReader<R, T>
 where
@@ -75,27 +80,27 @@ impl<R, T> From<R> for AsyncBincodeReader<R, T> {
 impl<R, T> Stream for AsyncBincodeReader<R, T>
 where
     for<'a> T: Deserialize<'a>,
-    R: AsyncRead,
+    R: AsyncRead + Unpin,
 {
-    type Item = T;
-    type Error = bincode::Error;
-    fn poll(&mut self) -> Result<Async<Option<Self::Item>>, Self::Error> {
-        if let FillResult::EOF = try_ready!(self.fill(5).map_err(bincode::Error::from)) {
-            return Ok(Async::Ready(None));
+    type Item = Result<T, bincode::Error>;
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
+        if let FillResult::EOF = ready!(self.as_mut().fill(cx, 5).map_err(bincode::Error::from))? {
+            return Poll::Ready(None);
         }
 
         let message_size: u32 = NetworkEndian::read_u32(&self.buffer[..4]);
         let target_buffer_size = message_size as usize;
 
         // since self.buffer.len() >= 4, we know that we can't get an clean EOF here
-        try_ready!(self
-            .fill(target_buffer_size + 4)
-            .map_err(bincode::Error::from));
+        ready!(self
+            .as_mut()
+            .fill(cx, target_buffer_size + 4)
+            .map_err(bincode::Error::from))?;
 
         self.buffer.advance(4);
         let message = bincode::deserialize(&self.buffer[..target_buffer_size])?;
         self.buffer.advance(target_buffer_size);
-        Ok(Async::Ready(Some(message)))
+        Poll::Ready(Some(Ok(message)))
     }
 }
 
@@ -107,12 +112,16 @@ enum FillResult {
 impl<R, T> AsyncBincodeReader<R, T>
 where
     for<'a> T: Deserialize<'a>,
-    R: tokio::io::AsyncRead,
+    R: tokio::io::AsyncRead + Unpin,
 {
-    fn fill(&mut self, target_size: usize) -> Result<Async<FillResult>, tokio::io::Error> {
+    fn fill(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context,
+        target_size: usize,
+    ) -> Poll<Result<FillResult, tokio::io::Error>> {
         if self.buffer.len() >= target_size {
             // we already have the bytes we need!
-            return Ok(Async::Ready(FillResult::Filled));
+            return Poll::Ready(Ok(FillResult::Filled));
         }
 
         // make sure we can fit all the data we're about to read
@@ -131,12 +140,12 @@ where
         unsafe { rest.set_len(max) };
 
         while self.buffer.len() < target_size {
-            let n = try_ready!(self.reader.poll_read(&mut rest[..]));
+            let n = ready!(Pin::new(&mut self.reader).poll_read(cx, &mut rest[..]))?;
             if n == 0 {
                 if self.buffer.len() == 0 {
-                    return Ok(Async::Ready(FillResult::EOF));
+                    return Poll::Ready(Ok(FillResult::EOF));
                 } else {
-                    return Err(tokio::io::Error::from(io::ErrorKind::BrokenPipe));
+                    return Poll::Ready(Err(tokio::io::Error::from(io::ErrorKind::BrokenPipe)));
                 }
             }
 
@@ -145,6 +154,6 @@ where
             self.buffer.unsplit(read);
         }
 
-        Ok(Async::Ready(FillResult::Filled))
+        Poll::Ready(Ok(FillResult::Filled))
     }
 }

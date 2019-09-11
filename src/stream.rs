@@ -1,10 +1,12 @@
+use crate::{AsyncBincodeReader, AsyncBincodeWriter};
+use crate::{AsyncDestination, SyncDestination};
 use bincode;
+use std::fmt;
 use std::ops::{Deref, DerefMut};
-use std::{fmt, io};
+use std::pin::Pin;
+use std::task::{Context, Poll};
 use tokio;
 use tokio::prelude::*;
-use {AsyncBincodeReader, AsyncBincodeWriter};
-use {AsyncDestination, SyncDestination};
 
 /// A wrapper around an asynchronous stream that receives and sends bincode-encoded values.
 ///
@@ -90,19 +92,18 @@ impl<S, R, W, D> AsyncBincodeStream<S, R, W, D> {
     pub fn for_sync(self) -> AsyncBincodeStream<S, R, W, SyncDestination> {
         AsyncBincodeStream::from(self.into_inner())
     }
+}
 
+impl<R, W, D> AsyncBincodeStream<tokio::net::tcp::TcpStream, R, W, D> {
     /// Split this async stream into a write half and a read half.
     ///
     /// Any partially sent or received state is preserved.
     pub fn split(
         mut self,
     ) -> (
-        AsyncBincodeReader<tokio::io::ReadHalf<S>, R>,
-        AsyncBincodeWriter<tokio::io::WriteHalf<S>, W, D>,
-    )
-    where
-        S: AsyncRead + AsyncWrite,
-    {
+        AsyncBincodeReader<tokio::net::tcp::split::TcpStreamReadHalf, R>,
+        AsyncBincodeWriter<tokio::net::tcp::split::TcpStreamWriteHalf, W, D>,
+    ) {
         // First, steal the reader state so it isn't lost
         let rbuff = self.stream.buffer.take();
         // Then, fish out the writer
@@ -124,15 +125,19 @@ impl<S, R, W, D> AsyncBincodeStream<S, R, W, D> {
     }
 }
 
-impl<S, T, D> tokio::io::AsyncRead for InternalAsyncWriter<S, T, D> where S: tokio::io::AsyncRead {}
-impl<S, T, D> io::Read for InternalAsyncWriter<S, T, D>
+impl<S, T, D> tokio::io::AsyncRead for InternalAsyncWriter<S, T, D>
 where
-    S: Read,
+    S: tokio::io::AsyncRead + Unpin,
 {
-    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        self.get_mut().read(buf)
+    fn poll_read(
+        self: Pin<&mut Self>,
+        cx: &mut Context,
+        buf: &mut [u8],
+    ) -> Poll<Result<usize, tokio::io::Error>> {
+        Pin::new(self.get_mut().get_mut()).poll_read(cx, buf)
     }
 }
+
 impl<S, T, D> Deref for InternalAsyncWriter<S, T, D> {
     type Target = AsyncBincodeWriter<S, T, D>;
     fn deref(&self) -> &Self::Target {
@@ -147,30 +152,35 @@ impl<S, T, D> DerefMut for InternalAsyncWriter<S, T, D> {
 
 impl<S, R, W, D> Stream for AsyncBincodeStream<S, R, W, D>
 where
-    AsyncBincodeReader<InternalAsyncWriter<S, W, D>, R>: Stream<Item = R, Error = bincode::Error>,
+    S: Unpin,
+    AsyncBincodeReader<InternalAsyncWriter<S, W, D>, R>: Stream<Item = Result<R, bincode::Error>>,
 {
-    type Item = R;
-    type Error = bincode::Error;
-    fn poll(&mut self) -> Result<Async<Option<Self::Item>>, Self::Error> {
-        self.stream.poll()
+    type Item = Result<R, bincode::Error>;
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
+        Pin::new(&mut self.stream).poll_next(cx)
     }
 }
 
-impl<S, R, W, D> Sink for AsyncBincodeStream<S, R, W, D>
+impl<S, R, W, D> Sink<W> for AsyncBincodeStream<S, R, W, D>
 where
-    AsyncBincodeWriter<S, W, D>: Sink<SinkItem = W, SinkError = bincode::Error>,
+    S: Unpin,
+    AsyncBincodeWriter<S, W, D>: Sink<W, Error = bincode::Error>,
 {
-    type SinkItem = W;
-    type SinkError = bincode::Error;
+    type Error = bincode::Error;
 
-    fn start_send(
-        &mut self,
-        item: Self::SinkItem,
-    ) -> Result<AsyncSink<Self::SinkItem>, Self::SinkError> {
-        self.stream.get_mut().start_send(item)
+    fn poll_ready(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Result<(), Self::Error>> {
+        Pin::new(&mut **self.stream.get_mut()).poll_ready(cx)
     }
 
-    fn poll_complete(&mut self) -> Result<Async<()>, Self::SinkError> {
-        self.stream.get_mut().poll_complete()
+    fn start_send(mut self: Pin<&mut Self>, item: W) -> Result<(), Self::Error> {
+        Pin::new(&mut **self.stream.get_mut()).start_send(item)
+    }
+
+    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Result<(), Self::Error>> {
+        Pin::new(&mut **self.stream.get_mut()).poll_flush(cx)
+    }
+
+    fn poll_close(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Result<(), Self::Error>> {
+        Pin::new(&mut **self.stream.get_mut()).poll_close(cx)
     }
 }
