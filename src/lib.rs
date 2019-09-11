@@ -12,7 +12,6 @@
 //! On the write side, `async-bincode` buffers the serialized values, and asynchronously sends the
 //! resulting bytestream.
 #![deny(missing_docs)]
-#![feature(async_await)]
 
 mod reader;
 mod stream;
@@ -44,13 +43,11 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::net::SocketAddr;
     use tokio::prelude::*;
 
     #[tokio::test]
     async fn it_works() {
-        let mut echo = tokio::net::TcpListener::bind(&SocketAddr::new("127.0.0.1".parse().unwrap(), 0))
-            .unwrap();
+        let mut echo = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = echo.local_addr().unwrap();
 
         tokio::spawn(
@@ -76,8 +73,7 @@ mod tests {
 
     #[tokio::test]
     async fn lots() {
-        let mut echo = tokio::net::TcpListener::bind(&SocketAddr::new("127.0.0.1".parse().unwrap(), 0))
-            .unwrap();
+        let mut echo = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = echo.local_addr().unwrap();
 
         tokio::spawn(
