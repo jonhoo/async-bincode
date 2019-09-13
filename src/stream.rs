@@ -1,18 +1,17 @@
 use crate::{AsyncBincodeReader, AsyncBincodeWriter};
 use crate::{AsyncDestination, SyncDestination};
-use bincode;
-use std::fmt;
+use futures_core::Stream;
+use futures_sink::Sink;
 use std::ops::{Deref, DerefMut};
 use std::pin::Pin;
 use std::task::{Context, Poll};
-use tokio;
-use tokio::prelude::*;
+use std::{fmt, io};
+use tokio_io::{AsyncRead, AsyncWrite};
 
 /// A wrapper around an asynchronous stream that receives and sends bincode-encoded values.
 ///
-/// To use, provide a stream that implements both `tokio::io::AsyncWrite` and
-/// `tokio::io::AsyncRead`, and then use `futures::Sink` to send values and `futures::Stream` to
-/// receive them.
+/// To use, provide a stream that implements both [`AsyncWrite`] and [`AsyncRead`], and then use
+/// [`Sink`] to send values and [`Stream`] to receive them.
 ///
 /// Note that an `AsyncBincodeStream` must be of the type [`AsyncDestination`] in order to be
 /// compatible with an [`AsyncBincodeReader`] on the remote end (recall that it requires the
@@ -94,15 +93,18 @@ impl<S, R, W, D> AsyncBincodeStream<S, R, W, D> {
     }
 }
 
-impl<R, W, D> AsyncBincodeStream<tokio::net::tcp::TcpStream, R, W, D> {
+impl<S, R, W, D> AsyncBincodeStream<S, R, W, D>
+where
+    S: AsyncRead + AsyncWrite,
+{
     /// Split this async stream into a write half and a read half.
     ///
     /// Any partially sent or received state is preserved.
     pub fn split(
         mut self,
     ) -> (
-        AsyncBincodeReader<tokio::net::tcp::split::TcpStreamReadHalf, R>,
-        AsyncBincodeWriter<tokio::net::tcp::split::TcpStreamWriteHalf, W, D>,
+        AsyncBincodeReader<tokio_io::split::ReadHalf<S>, R>,
+        AsyncBincodeWriter<tokio_io::split::WriteHalf<S>, W, D>,
     ) {
         // First, steal the reader state so it isn't lost
         let rbuff = self.stream.buffer.take();
@@ -112,7 +114,7 @@ impl<R, W, D> AsyncBincodeStream<tokio::net::tcp::TcpStream, R, W, D> {
         let wbuff = writer.buffer.split_off(0);
         let wsize = writer.written;
         // Now split the stream
-        let (r, w) = writer.into_inner().split();
+        let (r, w) = tokio_io::split::split(writer.into_inner());
         // Then put the reader back together
         let mut reader = AsyncBincodeReader::from(r);
         reader.buffer = rbuff;
@@ -125,15 +127,15 @@ impl<R, W, D> AsyncBincodeStream<tokio::net::tcp::TcpStream, R, W, D> {
     }
 }
 
-impl<S, T, D> tokio::io::AsyncRead for InternalAsyncWriter<S, T, D>
+impl<S, T, D> AsyncRead for InternalAsyncWriter<S, T, D>
 where
-    S: tokio::io::AsyncRead + Unpin,
+    S: AsyncRead + Unpin,
 {
     fn poll_read(
         self: Pin<&mut Self>,
         cx: &mut Context,
         buf: &mut [u8],
-    ) -> Poll<Result<usize, tokio::io::Error>> {
+    ) -> Poll<Result<usize, io::Error>> {
         Pin::new(self.get_mut().get_mut()).poll_read(cx, buf)
     }
 }

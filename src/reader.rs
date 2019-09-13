@@ -1,20 +1,18 @@
-use bincode;
 use byteorder::{ByteOrder, NetworkEndian};
 use bytes::BytesMut;
-use futures_core::ready;
+use futures_core::{ready, Stream};
 use serde::Deserialize;
 use std::io;
 use std::marker::PhantomData;
 use std::pin::Pin;
 use std::task::{Context, Poll};
-use tokio;
-use tokio::prelude::*;
+use tokio_io::AsyncRead;
 
 /// A wrapper around an asynchronous reader that produces an asynchronous stream of
 /// bincode-decoded values.
 ///
-/// To use, provide a reader that implements `tokio::io::AsyncRead`, and then use `futures::Stream`
-/// to access the deserialized values.
+/// To use, provide a reader that implements [`AsyncRead`], and then use [`Stream`] to access the
+/// deserialized values.
 ///
 /// Note that the sender *must* prefix each serialized item with its size as reported by
 /// `bincode::serialized_size` encoded as a four-byte network-endian encoded. See also
@@ -112,13 +110,13 @@ enum FillResult {
 impl<R, T> AsyncBincodeReader<R, T>
 where
     for<'a> T: Deserialize<'a>,
-    R: tokio::io::AsyncRead + Unpin,
+    R: AsyncRead + Unpin,
 {
     fn fill(
         mut self: Pin<&mut Self>,
         cx: &mut Context,
         target_size: usize,
-    ) -> Poll<Result<FillResult, tokio::io::Error>> {
+    ) -> Poll<Result<FillResult, io::Error>> {
         if self.buffer.len() >= target_size {
             // we already have the bytes we need!
             return Poll::Ready(Ok(FillResult::Filled));
@@ -145,7 +143,7 @@ where
                 if self.buffer.len() == 0 {
                     return Poll::Ready(Ok(FillResult::EOF));
                 } else {
-                    return Poll::Ready(Err(tokio::io::Error::from(io::ErrorKind::BrokenPipe)));
+                    return Poll::Ready(Err(io::Error::from(io::ErrorKind::BrokenPipe)));
                 }
             }
 

@@ -1,18 +1,16 @@
-use bincode;
 use byteorder::{NetworkEndian, WriteBytesExt};
 use futures_core::ready;
+use futures_sink::Sink;
 use serde::Serialize;
 use std::marker::PhantomData;
 use std::pin::Pin;
 use std::task::{Context, Poll};
-use tokio;
-use tokio::prelude::*;
+use tokio_io::AsyncWrite;
 
 /// A wrapper around an asynchronous sink that accepts, serializes, and sends bincode-encoded
 /// values.
 ///
-/// To use, provide a writer that implements `futures::AsyncWrite`, and then use `futures::Sink`
-/// to send values.
+/// To use, provide a writer that implements [`AsyncWrite`], and then use [`Sink`] to send values.
 ///
 /// Note that an `AsyncBincodeWriter` must be of the type [`AsyncDestination`] in order to be
 /// compatible with an [`AsyncBincodeReader`] on the remote end (recall that it requires the
