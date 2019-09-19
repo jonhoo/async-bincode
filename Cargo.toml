@@ -1,6 +1,6 @@
 [package]
 name = "async-bincode"
-version = "0.5.0-alpha.3"
+version = "0.5.0-alpha.4"
 edition = "2018"
 
 description = "Asynchronous access to a bincode-encoded item stream."
@@ -29,11 +29,9 @@ byteorder = "1.0.0"
 futures-core-preview = "0.3.0-alpha.18"
 futures-sink-preview = "0.3.0-alpha.18"
 serde = "1.0.8"
-tokio-io = "0.2.0-alpha.4"
-#tokio-io = { git = "https://github.com/tokio-rs/tokio.git" }
+tokio-io = "0.2.0-alpha.5"
 bytes = "0.4.11"
 
 [dev-dependencies]
 futures-preview = "0.3.0-alpha.18"
-tokio = "0.2.0-alpha.4"
-#tokio = { git = "https://github.com/tokio-rs/tokio.git" }
+tokio = "0.2.0-alpha.5"
