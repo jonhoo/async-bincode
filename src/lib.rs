@@ -31,15 +31,12 @@ mod tests {
         let mut echo = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = echo.local_addr().unwrap();
 
-        tokio::spawn(
-            async move {
-                let (stream, _) = echo.accept().await.unwrap();
-                let (r, w) = AsyncBincodeStream::<_, usize, usize, _>::from(stream)
-                    .for_async()
-                    .split();
-                r.forward(w).await.unwrap();
-            }
-        );
+        tokio::spawn(async move {
+            let (stream, _) = echo.accept().await.unwrap();
+            let mut stream = AsyncBincodeStream::<_, usize, usize, _>::from(stream).for_async();
+            let (r, w) = stream.tcp_split();
+            r.forward(w).await.unwrap();
+        });
 
         let client = tokio::net::TcpStream::connect(&addr).await.unwrap();
         let mut client = AsyncBincodeStream::<_, usize, usize, _>::from(client).for_async();
@@ -57,21 +54,22 @@ mod tests {
         let mut echo = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = echo.local_addr().unwrap();
 
-        tokio::spawn(
-            async move {
-                let (stream, _) = echo.accept().await.unwrap();
-                let (r, w) = AsyncBincodeStream::<_, usize, usize, _>::from(stream)
-                    .for_async()
-                    .split();
-                r.forward(w).await.unwrap();
-            }
-        );
+        tokio::spawn(async move {
+            let (stream, _) = echo.accept().await.unwrap();
+            let mut stream = AsyncBincodeStream::<_, usize, usize, _>::from(stream).for_async();
+            let (r, w) = stream.tcp_split();
+            r.forward(w).await.unwrap();
+        });
 
         let n = 81920;
         let stream = tokio::net::TcpStream::connect(&addr).await.unwrap();
         let mut c = AsyncBincodeStream::from(stream).for_async();
 
-        futures::stream::iter(0usize..n).map(Ok).forward(&mut c).await.unwrap();
+        futures::stream::iter(0usize..n)
+            .map(Ok)
+            .forward(&mut c)
+            .await
+            .unwrap();
 
         tokio::net::tcp::TcpStream::shutdown(c.get_mut(), std::net::Shutdown::Write).unwrap();
 
