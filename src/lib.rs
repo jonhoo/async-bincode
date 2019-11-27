@@ -24,7 +24,7 @@ pub use crate::writer::{AsyncDestination, BincodeWriterFor, SyncDestination};
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tokio::prelude::*;
+    use futures::prelude::*;
 
     #[tokio::test]
     async fn it_works() {
@@ -71,7 +71,7 @@ mod tests {
             .await
             .unwrap();
 
-        tokio::net::tcp::TcpStream::shutdown(c.get_mut(), std::net::Shutdown::Write).unwrap();
+        tokio::net::TcpStream::shutdown(c.get_mut(), std::net::Shutdown::Write).unwrap();
 
         let mut at = 0;
         while let Some(got) = c.next().await.transpose().unwrap() {

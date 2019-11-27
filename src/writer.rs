@@ -5,7 +5,7 @@ use serde::Serialize;
 use std::marker::PhantomData;
 use std::pin::Pin;
 use std::task::{Context, Poll};
-use tokio_io::AsyncWrite;
+use tokio::io::AsyncWrite;
 
 /// A wrapper around an asynchronous sink that accepts, serializes, and sends bincode-encoded
 /// values.

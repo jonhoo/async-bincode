@@ -6,7 +6,7 @@ use std::ops::{Deref, DerefMut};
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use std::{fmt, io};
-use tokio_io::AsyncRead;
+use tokio::io::AsyncRead;
 
 /// A wrapper around an asynchronous stream that receives and sends bincode-encoded values.
 ///
@@ -93,7 +93,7 @@ impl<S, R, W, D> AsyncBincodeStream<S, R, W, D> {
     }
 }
 
-impl<R, W, D> AsyncBincodeStream<tokio_net::tcp::TcpStream, R, W, D> {
+impl<R, W, D> AsyncBincodeStream<tokio::net::TcpStream, R, W, D> {
     /// Split a TCP-based stream into a read half and a write half.
     ///
     /// This is more performant than using a lock-based split like the one provided by `tokio-io`
@@ -104,8 +104,8 @@ impl<R, W, D> AsyncBincodeStream<tokio_net::tcp::TcpStream, R, W, D> {
     pub fn tcp_split(
         &mut self,
     ) -> (
-        AsyncBincodeReader<tokio_net::tcp::split::ReadHalf, R>,
-        AsyncBincodeWriter<tokio_net::tcp::split::WriteHalf, W, D>,
+        AsyncBincodeReader<tokio::net::tcp::ReadHalf, R>,
+        AsyncBincodeWriter<tokio::net::tcp::WriteHalf, W, D>,
     ) {
         // First, steal the reader state so it isn't lost
         let rbuff = self.stream.buffer.take();
