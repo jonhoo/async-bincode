@@ -108,7 +108,7 @@ impl<R, W, D> AsyncBincodeStream<tokio::net::TcpStream, R, W, D> {
         AsyncBincodeWriter<tokio::net::tcp::WriteHalf, W, D>,
     ) {
         // First, steal the reader state so it isn't lost
-        let rbuff = self.stream.buffer.take();
+        let rbuff = self.stream.buffer.split();
         // Then, fish out the writer
         let writer = &mut self.stream.get_mut().0;
         // And steal the writer state so it isn't lost

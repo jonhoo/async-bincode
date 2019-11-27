@@ -1,4 +1,5 @@
 use byteorder::{ByteOrder, NetworkEndian};
+use bytes::buf::Buf;
 use bytes::BytesMut;
 use futures_core::{ready, Stream};
 use serde::Deserialize;
