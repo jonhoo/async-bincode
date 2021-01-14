@@ -25,10 +25,11 @@ pub use crate::writer::{AsyncDestination, BincodeWriterFor, SyncDestination};
 mod tests {
     use super::*;
     use futures::prelude::*;
+    use tokio::io::AsyncWriteExt;
 
     #[tokio::test]
     async fn it_works() {
-        let mut echo = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let echo = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = echo.local_addr().unwrap();
 
         tokio::spawn(async move {
@@ -51,7 +52,7 @@ mod tests {
 
     #[tokio::test]
     async fn lots() {
-        let mut echo = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let echo = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = echo.local_addr().unwrap();
 
         tokio::spawn(async move {
@@ -71,7 +72,7 @@ mod tests {
             .await
             .unwrap();
 
-        tokio::net::TcpStream::shutdown(c.get_mut(), std::net::Shutdown::Write).unwrap();
+        c.get_mut().shutdown().await.unwrap();
 
         let mut at = 0;
         while let Some(got) = c.next().await.transpose().unwrap() {

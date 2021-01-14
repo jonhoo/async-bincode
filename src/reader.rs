@@ -7,7 +7,7 @@ use std::io;
 use std::marker::PhantomData;
 use std::pin::Pin;
 use std::task::{Context, Poll};
-use tokio::io::AsyncRead;
+use tokio::io::{AsyncRead, ReadBuf};
 
 /// A wrapper around an asynchronous reader that produces an asynchronous stream of
 /// bincode-decoded values.
@@ -139,7 +139,9 @@ where
         unsafe { rest.set_len(max) };
 
         while self.buffer.len() < target_size {
-            let n = ready!(Pin::new(&mut self.reader).poll_read(cx, &mut rest[..]))?;
+            let mut buf = ReadBuf::new(&mut rest[..]);
+            ready!(Pin::new(&mut self.reader).poll_read(cx, &mut buf))?;
+            let n = buf.filled().len();
             if n == 0 {
                 if self.buffer.len() == 0 {
                     return Poll::Ready(Ok(FillResult::EOF));
