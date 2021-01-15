@@ -6,7 +6,7 @@ use std::ops::{Deref, DerefMut};
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use std::{fmt, io};
-use tokio::io::AsyncRead;
+use tokio::io::{AsyncRead, ReadBuf};
 
 /// A wrapper around an asynchronous stream that receives and sends bincode-encoded values.
 ///
@@ -135,8 +135,8 @@ where
     fn poll_read(
         self: Pin<&mut Self>,
         cx: &mut Context,
-        buf: &mut [u8],
-    ) -> Poll<Result<usize, io::Error>> {
+        buf: &mut ReadBuf,
+    ) -> Poll<Result<(), io::Error>> {
         Pin::new(self.get_mut().get_mut()).poll_read(cx, buf)
     }
 }
