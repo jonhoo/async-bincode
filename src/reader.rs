@@ -147,7 +147,7 @@ where
             ready!(Pin::new(&mut self.reader).poll_read(cx, &mut buf))?;
             let n = buf.filled().len();
             if n == 0 {
-                if self.buffer.len() == 0 {
+                if self.buffer.is_empty() {
                     return Poll::Ready(Ok(FillResult::EOF));
                 } else {
                     return Poll::Ready(Err(io::Error::from(io::ErrorKind::BrokenPipe)));
