@@ -1,3 +1,4 @@
+use bincode::Options;
 use byteorder::{NetworkEndian, WriteBytesExt};
 use futures_core::ready;
 use futures_sink::Sink;
@@ -119,11 +120,15 @@ where
     T: Serialize,
 {
     fn append(&mut self, item: T) -> Result<(), bincode::Error> {
-        let mut c = bincode::config();
-        let c = c.limit(u32::max_value() as u64);
-        let size = c.serialized_size(&item)? as u32;
+        // https://github.com/servo/bincode/issues/364
+        let c = || {
+            bincode::options()
+                .with_limit(u32::max_value() as u64)
+                .allow_trailing_bytes()
+        };
+        let size = c().serialized_size(&item)? as u32;
         self.buffer.write_u32::<NetworkEndian>(size)?;
-        c.serialize_into(&mut self.buffer, &item)
+        c().serialize_into(&mut self.buffer, &item)
     }
 }
 

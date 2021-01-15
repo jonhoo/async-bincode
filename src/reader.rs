@@ -1,3 +1,4 @@
+use bincode::Options;
 use byteorder::{ByteOrder, NetworkEndian};
 use bytes::buf::Buf;
 use bytes::BytesMut;
@@ -97,7 +98,10 @@ where
             .map_err(bincode::Error::from))?;
 
         self.buffer.advance(4);
-        let message = bincode::deserialize(&self.buffer[..target_buffer_size])?;
+        let message = bincode::options()
+            .with_limit(u32::max_value() as u64)
+            .allow_trailing_bytes()
+            .deserialize(&self.buffer[..target_buffer_size])?;
         self.buffer.advance(target_buffer_size);
         Poll::Ready(Some(Ok(message)))
     }
