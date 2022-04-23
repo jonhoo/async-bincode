@@ -23,13 +23,16 @@ license = "MIT/Apache-2.0"
 travis-ci = { repository = "jonhoo/async-bincode" }
 maintenance = { status = "passively-maintained" }
 
+[features]
+default = ["tokio"]
+
 [dependencies]
 bincode = "1.3.2"
 byteorder = "1.0.0"
 futures-core = "0.3.0"
 futures-sink = "0.3.0"
 serde = "1.0.8"
-tokio = { version = "1.0", features = ["net"] }
+tokio = { version = "1.0", features = ["net"], optional = true }
 bytes = "1.0"
 
 [dev-dependencies]

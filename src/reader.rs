@@ -8,13 +8,14 @@ use std::io;
 use std::marker::PhantomData;
 use std::pin::Pin;
 use std::task::{Context, Poll};
-use tokio::io::{AsyncRead, ReadBuf};
 
 /// A wrapper around an asynchronous reader that produces an asynchronous stream of
 /// bincode-decoded values.
 ///
-/// To use, provide a reader that implements [`AsyncRead`], and then use [`Stream`] to access the
-/// deserialized values.
+/// To use, provide an async reader and then use [`Stream`] to access the deserialized values.
+///
+/// The async reader type should implement one of the following traits:
+#[cfg_attr(feature = "tokio", doc = "- [`tokio::io::AsyncRead`]")]
 ///
 /// Note that the sender *must* prefix each serialized item with its size as reported by
 /// `bincode::serialized_size` encoded as a four-byte network-endian encoded. See also
@@ -77,14 +78,28 @@ impl<R, T> From<R> for AsyncBincodeReader<R, T> {
     }
 }
 
-impl<R, T> Stream for AsyncBincodeReader<R, T>
+enum FillResult {
+    Filled,
+    EOF,
+}
+
+impl<R: Unpin, T> AsyncBincodeReader<R, T>
 where
     for<'a> T: Deserialize<'a>,
-    R: AsyncRead + Unpin,
 {
-    type Item = Result<T, bincode::Error>;
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
-        if let FillResult::EOF = ready!(self.as_mut().fill(cx, 5).map_err(bincode::Error::from))? {
+    fn internal_poll_next<F>(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context,
+        poll_reader: F,
+    ) -> Poll<Option<Result<T, bincode::Error>>>
+    where
+        F: Fn(Pin<&mut R>, &mut Context, &mut [u8]) -> Poll<Result<usize, io::Error>> + Copy,
+    {
+        if let FillResult::EOF = ready!(self
+            .as_mut()
+            .fill(cx, 5, poll_reader)
+            .map_err(bincode::Error::from))?
+        {
             return Poll::Ready(None);
         }
 
@@ -94,7 +109,7 @@ where
         // since self.buffer.len() >= 4, we know that we can't get an clean EOF here
         ready!(self
             .as_mut()
-            .fill(cx, target_buffer_size + 4)
+            .fill(cx, target_buffer_size + 4, poll_reader)
             .map_err(bincode::Error::from))?;
 
         self.buffer.advance(4);
@@ -105,23 +120,16 @@ where
         self.buffer.advance(target_buffer_size);
         Poll::Ready(Some(Ok(message)))
     }
-}
 
-enum FillResult {
-    Filled,
-    EOF,
-}
-
-impl<R, T> AsyncBincodeReader<R, T>
-where
-    for<'a> T: Deserialize<'a>,
-    R: AsyncRead + Unpin,
-{
-    fn fill(
+    fn fill<F>(
         mut self: Pin<&mut Self>,
         cx: &mut Context,
         target_size: usize,
-    ) -> Poll<Result<FillResult, io::Error>> {
+        poll_reader: F,
+    ) -> Poll<Result<FillResult, io::Error>>
+    where
+        F: Fn(Pin<&mut R>, &mut Context, &mut [u8]) -> Poll<Result<usize, io::Error>>,
+    {
         if self.buffer.len() >= target_size {
             // we already have the bytes we need!
             return Poll::Ready(Ok(FillResult::Filled));
@@ -143,9 +151,7 @@ where
         unsafe { rest.set_len(max) };
 
         while self.buffer.len() < target_size {
-            let mut buf = ReadBuf::new(&mut rest[..]);
-            ready!(Pin::new(&mut self.reader).poll_read(cx, &mut buf))?;
-            let n = buf.filled().len();
+            let n = ready!(poll_reader(Pin::new(&mut self.reader), cx, &mut rest[..]))?;
             if n == 0 {
                 if self.buffer.is_empty() {
                     return Poll::Ready(Ok(FillResult::EOF));
@@ -161,4 +167,31 @@ where
 
         Poll::Ready(Ok(FillResult::Filled))
     }
+}
+
+#[cfg(feature = "tokio")]
+impl<R, T> Stream for AsyncBincodeReader<R, T>
+where
+    for<'a> T: Deserialize<'a>,
+    R: tokio::io::AsyncRead + Unpin,
+{
+    type Item = Result<T, bincode::Error>;
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
+        self.internal_poll_next(cx, internal_poll_reader_tokio)
+    }
+}
+
+#[cfg(feature = "tokio")]
+fn internal_poll_reader_tokio<R>(
+    r: Pin<&mut R>,
+    cx: &mut Context,
+    rest: &mut [u8],
+) -> Poll<Result<usize, io::Error>>
+where
+    R: tokio::io::AsyncRead + Unpin,
+{
+    let mut buf = tokio::io::ReadBuf::new(rest);
+    ready!(r.poll_read(cx, &mut buf))?;
+    let n = buf.filled().len();
+    Poll::Ready(Ok(n))
 }

@@ -6,12 +6,14 @@ use serde::Serialize;
 use std::marker::PhantomData;
 use std::pin::Pin;
 use std::task::{Context, Poll};
-use tokio::io::AsyncWrite;
 
 /// A wrapper around an asynchronous sink that accepts, serializes, and sends bincode-encoded
 /// values.
 ///
-/// To use, provide a writer that implements [`AsyncWrite`], and then use [`Sink`] to send values.
+/// To use, provide an async writer and then use [`Sink`] to send values.
+///
+/// The async writer type must implement one of the following traits:
+#[cfg_attr(feature = "tokio", doc = "- [`tokio::io::AsyncWrite`]")]
 ///
 /// Note that an `AsyncBincodeWriter` must be of the type [`AsyncDestination`] in order to be
 /// compatible with an [`AsyncBincodeReader`] on the remote end (recall that it requires the
@@ -138,10 +140,11 @@ where
     }
 }
 
+#[cfg(feature = "tokio")]
 impl<W, T, D> Sink<T> for AsyncBincodeWriter<W, T, D>
 where
     T: Serialize,
-    W: AsyncWrite + Unpin,
+    W: tokio::io::AsyncWrite + Unpin,
     Self: BincodeWriterFor<T>,
 {
     type Error = bincode::Error;
