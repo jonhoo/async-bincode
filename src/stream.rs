@@ -6,12 +6,17 @@ use std::ops::{Deref, DerefMut};
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use std::{fmt, io};
-use tokio::io::{AsyncRead, ReadBuf};
 
 /// A wrapper around an asynchronous stream that receives and sends bincode-encoded values.
 ///
-/// To use, provide a stream that implements both [`AsyncWrite`] and [`AsyncRead`], and then use
-/// [`Sink`] to send values and [`Stream`] to receive them.
+/// To use, provide a stream that's both an async writer and async reader, and then use [`Sink`] to
+/// send values and [`Stream`] to receive them.
+///
+/// The stream type should implement one of the following combinations of traits:
+#[cfg_attr(
+    feature = "tokio",
+    doc = "- [`tokio::io::AsyncRead`] and [`tokio::io::AsyncWrite`]"
+)]
 ///
 /// Note that an `AsyncBincodeStream` must be of the type [`AsyncDestination`] in order to be
 /// compatible with an [`AsyncBincodeReader`] on the remote end (recall that it requires the
@@ -93,6 +98,7 @@ impl<S, R, W, D> AsyncBincodeStream<S, R, W, D> {
     }
 }
 
+#[cfg(feature = "tokio")]
 impl<R, W, D> AsyncBincodeStream<tokio::net::TcpStream, R, W, D> {
     /// Split a TCP-based stream into a read half and a write half.
     ///
@@ -128,14 +134,15 @@ impl<R, W, D> AsyncBincodeStream<tokio::net::TcpStream, R, W, D> {
     }
 }
 
-impl<S, T, D> AsyncRead for InternalAsyncWriter<S, T, D>
+#[cfg(feature = "tokio")]
+impl<S, T, D> tokio::io::AsyncRead for InternalAsyncWriter<S, T, D>
 where
-    S: AsyncRead + Unpin,
+    S: tokio::io::AsyncRead + Unpin,
 {
     fn poll_read(
         self: Pin<&mut Self>,
         cx: &mut Context,
-        buf: &mut ReadBuf,
+        buf: &mut tokio::io::ReadBuf,
     ) -> Poll<Result<(), io::Error>> {
         Pin::new(self.get_mut().get_mut()).poll_read(cx, buf)
     }

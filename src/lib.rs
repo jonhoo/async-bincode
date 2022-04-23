@@ -21,8 +21,8 @@ pub use crate::stream::AsyncBincodeStream;
 pub use crate::writer::AsyncBincodeWriter;
 pub use crate::writer::{AsyncDestination, BincodeWriterFor, SyncDestination};
 
-#[cfg(test)]
-mod tests {
+#[cfg(all(test, feature = "tokio"))]
+mod tokio_tests {
     use super::*;
     use futures::prelude::*;
     use tokio::io::AsyncWriteExt;
