@@ -30,10 +30,6 @@ pub mod futures;
 #[cfg(feature = "tokio")]
 pub mod tokio;
 
-// Re-export for compatibility with the async-bincode 0.6 series.
-#[cfg(feature = "tokio")]
-pub use crate::tokio::{AsyncBincodeReader, AsyncBincodeStream, AsyncBincodeWriter};
-
 pub use crate::writer::{AsyncDestination, BincodeWriterFor, SyncDestination};
 
 #[cfg(all(test, feature = "futures"))]
