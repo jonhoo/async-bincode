@@ -15,6 +15,7 @@ use std::task::{Context, Poll};
 /// To use, provide an async reader and then use [`Stream`] to access the deserialized values.
 ///
 /// The async reader type should implement one of the following traits:
+#[cfg_attr(feature = "futures", doc = "- [`futures_io::AsyncRead`]")]
 #[cfg_attr(feature = "tokio", doc = "- [`tokio::io::AsyncRead`]")]
 ///
 /// Note that the sender *must* prefix each serialized item with its size as reported by
@@ -167,6 +168,30 @@ where
 
         Poll::Ready(Ok(FillResult::Filled))
     }
+}
+
+#[cfg(feature = "futures")]
+impl<R, T> Stream for AsyncBincodeReader<R, T>
+where
+    for<'a> T: Deserialize<'a>,
+    R: futures_io::AsyncRead + Unpin,
+{
+    type Item = Result<T, bincode::Error>;
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
+        self.internal_poll_next(cx, internal_poll_reader_futures)
+    }
+}
+
+#[cfg(feature = "futures")]
+fn internal_poll_reader_futures<R>(
+    r: Pin<&mut R>,
+    cx: &mut Context,
+    rest: &mut [u8],
+) -> Poll<Result<usize, io::Error>>
+where
+    R: futures_io::AsyncRead + Unpin,
+{
+    r.poll_read(cx, rest)
 }
 
 #[cfg(feature = "tokio")]

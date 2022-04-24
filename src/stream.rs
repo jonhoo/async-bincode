@@ -14,6 +14,10 @@ use std::{fmt, io};
 ///
 /// The stream type should implement one of the following combinations of traits:
 #[cfg_attr(
+    feature = "futures",
+    doc = "- [`futures_io::AsyncRead`] and [`futures_io::AsyncWrite`]"
+)]
+#[cfg_attr(
     feature = "tokio",
     doc = "- [`tokio::io::AsyncRead`] and [`tokio::io::AsyncWrite`]"
 )]
@@ -131,6 +135,20 @@ impl<R, W, D> AsyncBincodeStream<tokio::net::TcpStream, R, W, D> {
         writer.written = wsize;
         // All good!
         (reader, writer)
+    }
+}
+
+#[cfg(feature = "futures")]
+impl<S, T, D> futures_io::AsyncRead for InternalAsyncWriter<S, T, D>
+where
+    S: futures_io::AsyncRead + Unpin,
+{
+    fn poll_read(
+        self: Pin<&mut Self>,
+        cx: &mut Context,
+        buf: &mut [u8],
+    ) -> Poll<Result<usize, io::Error>> {
+        Pin::new(self.get_mut().get_mut()).poll_read(cx, buf)
     }
 }
 

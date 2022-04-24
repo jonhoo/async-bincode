@@ -13,6 +13,7 @@ use std::task::{Context, Poll};
 /// To use, provide an async writer and then use [`Sink`] to send values.
 ///
 /// The async writer type must implement one of the following traits:
+#[cfg_attr(feature = "futures", doc = "- [`futures_io::AsyncWrite`]")]
 #[cfg_attr(feature = "tokio", doc = "- [`tokio::io::AsyncWrite`]")]
 ///
 /// Note that an `AsyncBincodeWriter` must be of the type [`AsyncDestination`] in order to be
@@ -137,6 +138,61 @@ where
 {
     fn append(&mut self, item: T) -> Result<(), bincode::Error> {
         bincode::serialize_into(&mut self.buffer, &item)
+    }
+}
+
+#[cfg(feature = "futures")]
+impl<W, T, D> Sink<T> for AsyncBincodeWriter<W, T, D>
+where
+    T: Serialize,
+    W: futures_io::AsyncWrite + Unpin,
+    Self: BincodeWriterFor<T>,
+{
+    type Error = bincode::Error;
+
+    fn poll_ready(self: Pin<&mut Self>, _: &mut Context) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
+    }
+
+    fn start_send(mut self: Pin<&mut Self>, item: T) -> Result<(), Self::Error> {
+        if self.buffer.is_empty() {
+            // NOTE: in theory we could have a short-circuit here that tries to have bincode write
+            // directly into self.writer. this would be way more efficient in the common case as we
+            // don't have to do the extra buffering. the idea would be to serialize fist, and *if*
+            // it errors, see how many bytes were written, serialize again into a Vec, and then
+            // keep only the bytes following the number that were written in our buffer.
+            // unfortunately, bincode will not tell us that number at the moment, and instead just
+            // fail.
+        }
+
+        self.append(item)?;
+        Ok(())
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Result<(), Self::Error>> {
+        // allow us to borrow fields separately
+        let this = self.get_mut();
+
+        // write stuff out if we need to
+        while this.written != this.buffer.len() {
+            let n =
+                ready!(Pin::new(&mut this.writer).poll_write(cx, &this.buffer[this.written..]))?;
+            this.written += n;
+        }
+
+        // we have to flush before we're really done
+        this.buffer.clear();
+        this.written = 0;
+        Pin::new(&mut this.writer)
+            .poll_flush(cx)
+            .map_err(bincode::Error::from)
+    }
+
+    fn poll_close(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Result<(), Self::Error>> {
+        ready!(self.as_mut().poll_flush(cx))?;
+        Pin::new(&mut self.writer)
+            .poll_close(cx)
+            .map_err(bincode::Error::from)
     }
 }
 
