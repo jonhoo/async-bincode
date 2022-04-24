@@ -1,6 +1,6 @@
 [package]
 name = "async-bincode"
-version = "0.6.1"
+version = "0.6.2"
 edition = "2018"
 
 description = "Asynchronous access to a bincode-encoded item stream."
