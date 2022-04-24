@@ -1,196 +1,166 @@
-use crate::{AsyncBincodeReader, AsyncBincodeWriter};
-use crate::{AsyncDestination, SyncDestination};
-use futures_core::Stream;
-use futures_sink::Sink;
-use std::ops::{Deref, DerefMut};
-use std::pin::Pin;
-use std::task::{Context, Poll};
-use std::{fmt, io};
-
-/// A wrapper around an asynchronous stream that receives and sends bincode-encoded values.
-///
-/// To use, provide a stream that's both an async writer and async reader, and then use [`Sink`] to
-/// send values and [`Stream`] to receive them.
-///
-/// The stream type should implement one of the following combinations of traits:
-#[cfg_attr(
-    feature = "tokio",
-    doc = "- [`tokio::io::AsyncRead`] and [`tokio::io::AsyncWrite`]"
-)]
-///
-/// Note that an `AsyncBincodeStream` must be of the type [`AsyncDestination`] in order to be
-/// compatible with an [`AsyncBincodeReader`] on the remote end (recall that it requires the
-/// serialized size prefixed to the serialized data). The default is [`SyncDestination`], but these
-/// can be easily toggled between using [`AsyncBincodeStream::for_async`].
-#[derive(Debug)]
-pub struct AsyncBincodeStream<S, R, W, D> {
-    stream: AsyncBincodeReader<InternalAsyncWriter<S, W, D>, R>,
-}
-
-#[doc(hidden)]
-pub struct InternalAsyncWriter<S, T, D>(AsyncBincodeWriter<S, T, D>);
-
-impl<S: fmt::Debug, T, D> fmt::Debug for InternalAsyncWriter<S, T, D> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        self.get_ref().fmt(f)
-    }
-}
-
-impl<S, R, W> Default for AsyncBincodeStream<S, R, W, SyncDestination>
-where
-    S: Default,
-{
-    fn default() -> Self {
-        Self::from(S::default())
-    }
-}
-
-impl<S, R, W, D> AsyncBincodeStream<S, R, W, D> {
-    /// Gets a reference to the underlying stream.
-    ///
-    /// It is inadvisable to directly read from or write to the underlying stream.
-    pub fn get_ref(&self) -> &S {
-        &self.stream.get_ref().0.get_ref()
-    }
-
-    /// Gets a mutable reference to the underlying stream.
-    ///
-    /// It is inadvisable to directly read from or write to the underlying stream.
-    pub fn get_mut(&mut self) -> &mut S {
-        self.stream.get_mut().0.get_mut()
-    }
-
-    /// Unwraps this `AsyncBincodeStream`, returning the underlying stream.
-    ///
-    /// Note that any leftover serialized data that has not yet been sent, or received data that
-    /// has not yet been deserialized, is lost.
-    pub fn into_inner(self) -> S {
-        self.stream.into_inner().0.into_inner()
-    }
-}
-
-impl<S, R, W> From<S> for AsyncBincodeStream<S, R, W, SyncDestination> {
-    fn from(stream: S) -> Self {
-        AsyncBincodeStream {
-            stream: AsyncBincodeReader::from(InternalAsyncWriter(AsyncBincodeWriter::from(stream))),
+macro_rules! make_stream {
+    ($read_trait:path, $write_trait:path, $buf_type:ty, $read_ret_type:ty) => {
+        /// A wrapper around an asynchronous stream that receives and sends bincode-encoded values.
+        ///
+        /// To use, provide a stream that implements both
+        #[doc=concat!("[`", stringify!($read_trait), "`] and [`", stringify!($write_trait), "`],")]
+        /// and then use [`futures_sink::Sink`] to send values and [`futures_core::Stream`] to
+        /// receive them.
+        ///
+        /// Note that an `AsyncBincodeStream` must be of the type [`crate::AsyncDestination`] in
+        /// order to be compatible with an [`AsyncBincodeReader`] on the remote end (recall that it
+        /// requires the serialized size prefixed to the serialized data). The default is
+        /// [`crate::SyncDestination`], but these can be easily toggled between using
+        /// [`AsyncBincodeStream::for_async`].
+        #[derive(Debug)]
+        pub struct AsyncBincodeStream<S, R, W, D> {
+            stream: AsyncBincodeReader<InternalAsyncWriter<S, W, D>, R>,
         }
-    }
-}
 
-impl<S, R, W, D> AsyncBincodeStream<S, R, W, D> {
-    /// Make this stream include the serialized data's size before each serialized value.
-    ///
-    /// This is necessary for compatability with a remote [`AsyncBincodeReader`].
-    pub fn for_async(self) -> AsyncBincodeStream<S, R, W, AsyncDestination> {
-        let stream = self.into_inner();
-        AsyncBincodeStream {
-            stream: AsyncBincodeReader::from(InternalAsyncWriter(
-                AsyncBincodeWriter::from(stream).for_async(),
-            )),
+        #[doc(hidden)]
+        pub struct InternalAsyncWriter<S, T, D>(AsyncBincodeWriter<S, T, D>);
+
+        impl<S: std::fmt::Debug, T, D> std::fmt::Debug for InternalAsyncWriter<S, T, D> {
+            fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                self.get_ref().fmt(f)
+            }
         }
-    }
 
-    /// Make this stream only send bincode-encoded values.
-    ///
-    /// This is necessary for compatability with stock `bincode` receivers.
-    pub fn for_sync(self) -> AsyncBincodeStream<S, R, W, SyncDestination> {
-        AsyncBincodeStream::from(self.into_inner())
-    }
-}
+        impl<S, R, W> Default for AsyncBincodeStream<S, R, W, SyncDestination>
+        where
+            S: Default,
+        {
+            fn default() -> Self {
+                Self::from(S::default())
+            }
+        }
 
-#[cfg(feature = "tokio")]
-impl<R, W, D> AsyncBincodeStream<tokio::net::TcpStream, R, W, D> {
-    /// Split a TCP-based stream into a read half and a write half.
-    ///
-    /// This is more performant than using a lock-based split like the one provided by `tokio-io`
-    /// or `futures-util` since we know that reads and writes to a `TcpStream` can continue
-    /// concurrently.
-    ///
-    /// Any partially sent or received state is preserved.
-    pub fn tcp_split(
-        &mut self,
-    ) -> (
-        AsyncBincodeReader<tokio::net::tcp::ReadHalf, R>,
-        AsyncBincodeWriter<tokio::net::tcp::WriteHalf, W, D>,
-    ) {
-        // First, steal the reader state so it isn't lost
-        let rbuff = self.stream.buffer.split();
-        // Then, fish out the writer
-        let writer = &mut self.stream.get_mut().0;
-        // And steal the writer state so it isn't lost
-        let wbuff = writer.buffer.split_off(0);
-        let wsize = writer.written;
-        // Now split the stream
-        let (r, w) = writer.get_mut().split();
-        // Then put the reader back together
-        let mut reader = AsyncBincodeReader::from(r);
-        reader.buffer = rbuff;
-        // And then the writer
-        let mut writer: AsyncBincodeWriter<_, _, D> = AsyncBincodeWriter::from(w).make_for();
-        writer.buffer = wbuff;
-        writer.written = wsize;
-        // All good!
-        (reader, writer)
-    }
-}
+        impl<S, R, W, D> AsyncBincodeStream<S, R, W, D> {
+            /// Gets a reference to the underlying stream.
+            ///
+            /// It is inadvisable to directly read from or write to the underlying stream.
+            pub fn get_ref(&self) -> &S {
+                &self.stream.get_ref().0.get_ref()
+            }
 
-#[cfg(feature = "tokio")]
-impl<S, T, D> tokio::io::AsyncRead for InternalAsyncWriter<S, T, D>
-where
-    S: tokio::io::AsyncRead + Unpin,
-{
-    fn poll_read(
-        self: Pin<&mut Self>,
-        cx: &mut Context,
-        buf: &mut tokio::io::ReadBuf,
-    ) -> Poll<Result<(), io::Error>> {
-        Pin::new(self.get_mut().get_mut()).poll_read(cx, buf)
-    }
-}
+            /// Gets a mutable reference to the underlying stream.
+            ///
+            /// It is inadvisable to directly read from or write to the underlying stream.
+            pub fn get_mut(&mut self) -> &mut S {
+                self.stream.get_mut().0.get_mut()
+            }
 
-impl<S, T, D> Deref for InternalAsyncWriter<S, T, D> {
-    type Target = AsyncBincodeWriter<S, T, D>;
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-impl<S, T, D> DerefMut for InternalAsyncWriter<S, T, D> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
-    }
-}
+            /// Unwraps this `AsyncBincodeStream`, returning the underlying stream.
+            ///
+            /// Note that any leftover serialized data that has not yet been sent, or received data that
+            /// has not yet been deserialized, is lost.
+            pub fn into_inner(self) -> S {
+                self.stream.into_inner().0.into_inner()
+            }
+        }
 
-impl<S, R, W, D> Stream for AsyncBincodeStream<S, R, W, D>
-where
-    S: Unpin,
-    AsyncBincodeReader<InternalAsyncWriter<S, W, D>, R>: Stream<Item = Result<R, bincode::Error>>,
-{
-    type Item = Result<R, bincode::Error>;
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
-        Pin::new(&mut self.stream).poll_next(cx)
-    }
-}
+        impl<S, R, W> From<S> for AsyncBincodeStream<S, R, W, SyncDestination> {
+            fn from(stream: S) -> Self {
+                AsyncBincodeStream {
+                    stream: AsyncBincodeReader::from(InternalAsyncWriter(
+                        AsyncBincodeWriter::from(stream),
+                    )),
+                }
+            }
+        }
 
-impl<S, R, W, D> Sink<W> for AsyncBincodeStream<S, R, W, D>
-where
-    S: Unpin,
-    AsyncBincodeWriter<S, W, D>: Sink<W, Error = bincode::Error>,
-{
-    type Error = bincode::Error;
+        impl<S, R, W, D> AsyncBincodeStream<S, R, W, D> {
+            /// Make this stream include the serialized data's size before each serialized value.
+            ///
+            /// This is necessary for compatability with a remote [`AsyncBincodeReader`].
+            pub fn for_async(self) -> AsyncBincodeStream<S, R, W, crate::AsyncDestination> {
+                let stream = self.into_inner();
+                AsyncBincodeStream {
+                    stream: AsyncBincodeReader::from(InternalAsyncWriter(
+                        AsyncBincodeWriter::from(stream).for_async(),
+                    )),
+                }
+            }
 
-    fn poll_ready(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Result<(), Self::Error>> {
-        Pin::new(&mut **self.stream.get_mut()).poll_ready(cx)
-    }
+            /// Make this stream only send bincode-encoded values.
+            ///
+            /// This is necessary for compatability with stock `bincode` receivers.
+            pub fn for_sync(self) -> AsyncBincodeStream<S, R, W, crate::SyncDestination> {
+                AsyncBincodeStream::from(self.into_inner())
+            }
+        }
 
-    fn start_send(mut self: Pin<&mut Self>, item: W) -> Result<(), Self::Error> {
-        Pin::new(&mut **self.stream.get_mut()).start_send(item)
-    }
+        impl<S, T, D> $read_trait for InternalAsyncWriter<S, T, D>
+        where
+            S: $read_trait + Unpin,
+        {
+            fn poll_read(
+                self: std::pin::Pin<&mut Self>,
+                cx: &mut std::task::Context,
+                buf: &mut $buf_type,
+            ) -> std::task::Poll<std::io::Result<$read_ret_type>> {
+                std::pin::Pin::new(self.get_mut().get_mut()).poll_read(cx, buf)
+            }
+        }
 
-    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Result<(), Self::Error>> {
-        Pin::new(&mut **self.stream.get_mut()).poll_flush(cx)
-    }
+        impl<S, T, D> std::ops::Deref for InternalAsyncWriter<S, T, D> {
+            type Target = AsyncBincodeWriter<S, T, D>;
+            fn deref(&self) -> &Self::Target {
+                &self.0
+            }
+        }
+        impl<S, T, D> std::ops::DerefMut for InternalAsyncWriter<S, T, D> {
+            fn deref_mut(&mut self) -> &mut Self::Target {
+                &mut self.0
+            }
+        }
 
-    fn poll_close(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Result<(), Self::Error>> {
-        Pin::new(&mut **self.stream.get_mut()).poll_close(cx)
-    }
+        impl<S, R, W, D> futures_core::Stream for AsyncBincodeStream<S, R, W, D>
+        where
+            S: Unpin,
+            AsyncBincodeReader<InternalAsyncWriter<S, W, D>, R>:
+                futures_core::Stream<Item = Result<R, bincode::Error>>,
+        {
+            type Item = Result<R, bincode::Error>;
+            fn poll_next(
+                mut self: std::pin::Pin<&mut Self>,
+                cx: &mut std::task::Context,
+            ) -> std::task::Poll<Option<Self::Item>> {
+                std::pin::Pin::new(&mut self.stream).poll_next(cx)
+            }
+        }
+
+        impl<S, R, W, D> futures_sink::Sink<W> for AsyncBincodeStream<S, R, W, D>
+        where
+            S: Unpin,
+            AsyncBincodeWriter<S, W, D>: futures_sink::Sink<W, Error = bincode::Error>,
+        {
+            type Error = bincode::Error;
+
+            fn poll_ready(
+                mut self: std::pin::Pin<&mut Self>,
+                cx: &mut std::task::Context,
+            ) -> std::task::Poll<Result<(), Self::Error>> {
+                std::pin::Pin::new(&mut **self.stream.get_mut()).poll_ready(cx)
+            }
+
+            fn start_send(mut self: std::pin::Pin<&mut Self>, item: W) -> Result<(), Self::Error> {
+                std::pin::Pin::new(&mut **self.stream.get_mut()).start_send(item)
+            }
+
+            fn poll_flush(
+                mut self: std::pin::Pin<&mut Self>,
+                cx: &mut std::task::Context,
+            ) -> std::task::Poll<Result<(), Self::Error>> {
+                std::pin::Pin::new(&mut **self.stream.get_mut()).poll_flush(cx)
+            }
+
+            fn poll_close(
+                mut self: std::pin::Pin<&mut Self>,
+                cx: &mut std::task::Context,
+            ) -> std::task::Poll<Result<(), Self::Error>> {
+                std::pin::Pin::new(&mut **self.stream.get_mut()).poll_close(cx)
+            }
+        }
+    };
 }
