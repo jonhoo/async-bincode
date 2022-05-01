@@ -119,7 +119,9 @@ macro_rules! make_writer {
             T: serde::Serialize,
         {
             fn append(&mut self, item: T) -> Result<(), bincode::Error> {
-                bincode::serialize_into(&mut self.buffer, &item)
+                use bincode::Options;
+                let c = bincode::options().allow_trailing_bytes();
+                c.serialize_into(&mut self.buffer, &item)
             }
         }
 
