@@ -22,10 +22,6 @@ license = "MIT/Apache-2.0"
 [package.metadata.docs.rs]
 all-features = true
 
-[badges]
-travis-ci = { repository = "jonhoo/async-bincode" }
-maintenance = { status = "passively-maintained" }
-
 [features]
 default = ["tokio"]
 futures = ["futures-io"]
