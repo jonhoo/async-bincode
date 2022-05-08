@@ -2,89 +2,126 @@ use bincode::Options;
 use byteorder::{ByteOrder, NetworkEndian};
 use bytes::buf::Buf;
 use bytes::BytesMut;
-use futures_core::{ready, Stream};
+use futures_core::ready;
 use serde::Deserialize;
 use std::io;
 use std::marker::PhantomData;
 use std::pin::Pin;
 use std::task::{Context, Poll};
-use tokio::io::{AsyncRead, ReadBuf};
 
-/// A wrapper around an asynchronous reader that produces an asynchronous stream of
-/// bincode-decoded values.
-///
-/// To use, provide a reader that implements [`AsyncRead`], and then use [`Stream`] to access the
-/// deserialized values.
-///
-/// Note that the sender *must* prefix each serialized item with its size as reported by
-/// `bincode::serialized_size` encoded as a four-byte network-endian encoded. See also
-/// [`serialize_into`], which does this for you.
+macro_rules! make_reader {
+    ($read_trait:path, $internal_poll_reader:path) => {
+        /// A wrapper around an asynchronous reader that produces an asynchronous stream of
+        /// bincode-decoded values.
+        ///
+        /// To use, provide a reader that implements
+        #[doc=concat!("[`", stringify!($read_trait), "`],")]
+        /// and then use [`futures_core::Stream`] to access the deserialized values.
+        ///
+        /// Note that the sender *must* prefix each serialized item with its size as reported by
+        /// `bincode::serialized_size` encoded as a four-byte network-endian encoded. See also
+        /// [`serialize_into`], which does this for you.
+        #[derive(Debug)]
+        pub struct AsyncBincodeReader<R, T>(crate::reader::AsyncBincodeReader<R, T>);
+
+        impl<R, T> Unpin for AsyncBincodeReader<R, T> where R: Unpin {}
+
+        impl<R, T> Default for AsyncBincodeReader<R, T>
+        where
+            R: Default,
+        {
+            fn default() -> Self {
+                Self::from(R::default())
+            }
+        }
+
+        impl<R, T> From<R> for AsyncBincodeReader<R, T> {
+            fn from(reader: R) -> Self {
+                Self(crate::reader::AsyncBincodeReader {
+                    buffer: ::bytes::BytesMut::with_capacity(8192),
+                    reader,
+                    into: ::std::marker::PhantomData,
+                })
+            }
+        }
+
+        impl<R, T> AsyncBincodeReader<R, T> {
+            /// Gets a reference to the underlying reader.
+            ///
+            /// It is inadvisable to directly read from the underlying reader.
+            pub fn get_ref(&self) -> &R {
+                &self.0.reader
+            }
+
+            /// Gets a mutable reference to the underlying reader.
+            ///
+            /// It is inadvisable to directly read from the underlying reader.
+            pub fn get_mut(&mut self) -> &mut R {
+                &mut self.0.reader
+            }
+
+            /// Returns a reference to the internally buffered data.
+            ///
+            /// This will not attempt to fill the buffer if it is empty.
+            pub fn buffer(&self) -> &[u8] {
+                &self.0.buffer[..]
+            }
+
+            /// Unwraps this `AsyncBincodeReader`, returning the underlying reader.
+            ///
+            /// Note that any leftover data in the internal buffer is lost.
+            pub fn into_inner(self) -> R {
+                self.0.reader
+            }
+        }
+
+        impl<R, T> ::futures_core::Stream for AsyncBincodeReader<R, T>
+        where
+            for<'a> T: ::serde::Deserialize<'a>,
+            R: $read_trait + Unpin,
+        {
+            type Item = Result<T, bincode::Error>;
+            fn poll_next(
+                mut self: std::pin::Pin<&mut Self>,
+                cx: &mut std::task::Context,
+            ) -> std::task::Poll<Option<Self::Item>> {
+                std::pin::Pin::new(&mut self.0).internal_poll_next(cx, $internal_poll_reader)
+            }
+        }
+    };
+}
+
 #[derive(Debug)]
-pub struct AsyncBincodeReader<R, T> {
-    reader: R,
+pub(crate) struct AsyncBincodeReader<R, T> {
+    pub(crate) reader: R,
     pub(crate) buffer: BytesMut,
-    into: PhantomData<T>,
+    pub(crate) into: PhantomData<T>,
 }
 
 impl<R, T> Unpin for AsyncBincodeReader<R, T> where R: Unpin {}
 
-impl<R, T> Default for AsyncBincodeReader<R, T>
-where
-    R: Default,
-{
-    fn default() -> Self {
-        Self::from(R::default())
-    }
+enum FillResult {
+    Filled,
+    EOF,
 }
 
-impl<R, T> AsyncBincodeReader<R, T> {
-    /// Gets a reference to the underlying reader.
-    ///
-    /// It is inadvisable to directly read from the underlying reader.
-    pub fn get_ref(&self) -> &R {
-        &self.reader
-    }
-
-    /// Gets a mutable reference to the underlying reader.
-    ///
-    /// It is inadvisable to directly read from the underlying reader.
-    pub fn get_mut(&mut self) -> &mut R {
-        &mut self.reader
-    }
-
-    /// Returns a reference to the internally buffered data.
-    ///
-    /// This will not attempt to fill the buffer if it is empty.
-    pub fn buffer(&self) -> &[u8] {
-        &self.buffer[..]
-    }
-
-    /// Unwraps this `AsyncBincodeReader`, returning the underlying reader.
-    ///
-    /// Note that any leftover data in the internal buffer is lost.
-    pub fn into_inner(self) -> R {
-        self.reader
-    }
-}
-
-impl<R, T> From<R> for AsyncBincodeReader<R, T> {
-    fn from(reader: R) -> Self {
-        AsyncBincodeReader {
-            buffer: BytesMut::with_capacity(8192),
-            reader,
-            into: PhantomData,
-        }
-    }
-}
-
-impl<R, T> Stream for AsyncBincodeReader<R, T>
+impl<R: Unpin, T> AsyncBincodeReader<R, T>
 where
     for<'a> T: Deserialize<'a>,
-    R: AsyncRead + Unpin,
 {
-    type Item = Result<T, bincode::Error>;
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
-        if let FillResult::EOF = ready!(self.as_mut().fill(cx, 5).map_err(bincode::Error::from))? {
+    pub(crate) fn internal_poll_next<F>(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context,
+        poll_reader: F,
+    ) -> Poll<Option<Result<T, bincode::Error>>>
+    where
+        F: Fn(Pin<&mut R>, &mut Context, &mut [u8]) -> Poll<Result<usize, io::Error>> + Copy,
+    {
+        if let FillResult::EOF = ready!(self
+            .as_mut()
+            .fill(cx, 5, poll_reader)
+            .map_err(bincode::Error::from))?
+        {
             return Poll::Ready(None);
         }
 
@@ -94,7 +131,7 @@ where
         // since self.buffer.len() >= 4, we know that we can't get an clean EOF here
         ready!(self
             .as_mut()
-            .fill(cx, target_buffer_size + 4)
+            .fill(cx, target_buffer_size + 4, poll_reader)
             .map_err(bincode::Error::from))?;
 
         self.buffer.advance(4);
@@ -105,23 +142,16 @@ where
         self.buffer.advance(target_buffer_size);
         Poll::Ready(Some(Ok(message)))
     }
-}
 
-enum FillResult {
-    Filled,
-    EOF,
-}
-
-impl<R, T> AsyncBincodeReader<R, T>
-where
-    for<'a> T: Deserialize<'a>,
-    R: AsyncRead + Unpin,
-{
-    fn fill(
+    fn fill<F>(
         mut self: Pin<&mut Self>,
         cx: &mut Context,
         target_size: usize,
-    ) -> Poll<Result<FillResult, io::Error>> {
+        poll_reader: F,
+    ) -> Poll<Result<FillResult, io::Error>>
+    where
+        F: Fn(Pin<&mut R>, &mut Context, &mut [u8]) -> Poll<Result<usize, io::Error>>,
+    {
         if self.buffer.len() >= target_size {
             // we already have the bytes we need!
             return Poll::Ready(Ok(FillResult::Filled));
@@ -143,9 +173,7 @@ where
         unsafe { rest.set_len(max) };
 
         while self.buffer.len() < target_size {
-            let mut buf = ReadBuf::new(&mut rest[..]);
-            ready!(Pin::new(&mut self.reader).poll_read(cx, &mut buf))?;
-            let n = buf.filled().len();
+            let n = ready!(poll_reader(Pin::new(&mut self.reader), cx, &mut rest[..]))?;
             if n == 0 {
                 if self.buffer.is_empty() {
                     return Poll::Ready(Ok(FillResult::EOF));

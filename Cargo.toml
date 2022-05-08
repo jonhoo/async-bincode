@@ -1,6 +1,6 @@
 [package]
 name = "async-bincode"
-version = "0.6.1"
+version = "0.6.2"
 edition = "2018"
 
 description = "Asynchronous access to a bincode-encoded item stream."
@@ -19,19 +19,28 @@ categories = ["asynchronous", "encoding", "network-programming"]
 
 license = "MIT/Apache-2.0"
 
+[package.metadata.docs.rs]
+all-features = true
+
 [badges]
 travis-ci = { repository = "jonhoo/async-bincode" }
 maintenance = { status = "passively-maintained" }
+
+[features]
+default = ["tokio"]
+futures = ["futures-io"]
 
 [dependencies]
 bincode = "1.3.2"
 byteorder = "1.0.0"
 futures-core = "0.3.0"
+futures-io = { version = "0.3.21", optional = true }
 futures-sink = "0.3.0"
 serde = "1.0.8"
-tokio = { version = "1.0", features = ["net"] }
+tokio = { version = "1.0", features = ["net"], optional = true }
 bytes = "1.0"
 
 [dev-dependencies]
+async-std = { version = "1.11.0", features = ["attributes"] }
 futures = "0.3.0"
 tokio = { version = "1.0", features = ["full"] }

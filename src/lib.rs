@@ -10,20 +10,104 @@
 //!
 //! On the write side, `async-bincode` buffers the serialized values, and asynchronously sends the
 //! resulting bytestream.
+//!
+//! This crate provides two sets of types in two separate modules. The types in the `futures`
+//! module work with the `futures_io`/`async-std` ecosystem. The types in the `tokio` module work
+//! with the `tokio` ecosystem.
 #![deny(missing_docs)]
+#[cfg(not(any(feature = "futures", feature = "tokio")))]
+compile_error!("async-bincode: Enable at least one of \"futures\" or \"tokio\".");
 
+#[macro_use]
 mod reader;
+#[macro_use]
 mod stream;
+#[macro_use]
 mod writer;
 
-pub use crate::reader::AsyncBincodeReader;
-pub use crate::stream::AsyncBincodeStream;
-pub use crate::writer::AsyncBincodeWriter;
+#[cfg(feature = "futures")]
+pub mod futures;
+#[cfg(feature = "tokio")]
+pub mod tokio;
+
+// Re-export for compatibility with the async-bincode 0.6 series.
+#[cfg(feature = "tokio")]
+pub use crate::tokio::{AsyncBincodeReader, AsyncBincodeStream, AsyncBincodeWriter};
+
 pub use crate::writer::{AsyncDestination, BincodeWriterFor, SyncDestination};
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+#[cfg(all(test, feature = "futures"))]
+mod futures_tests {
+    use crate::futures::*;
+    use ::futures::prelude::*;
+
+    #[async_std::test]
+    async fn it_works() {
+        let echo = async_std::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .unwrap();
+        let addr = echo.local_addr().unwrap();
+
+        async_std::task::spawn(async move {
+            let (stream, _) = echo.accept().await.unwrap();
+            let mut stream = AsyncBincodeStream::<_, usize, usize, _>::from(stream).for_async();
+            while let Some(item) = stream.next().await {
+                stream.send(item.unwrap()).await.unwrap();
+            }
+        });
+
+        let client = async_std::net::TcpStream::connect(&addr).await.unwrap();
+        let mut client = AsyncBincodeStream::<_, usize, usize, _>::from(client).for_async();
+        client.send(42).await.unwrap();
+        assert_eq!(client.next().await.unwrap().unwrap(), 42);
+
+        client.send(44).await.unwrap();
+        assert_eq!(client.next().await.unwrap().unwrap(), 44);
+
+        drop(client);
+    }
+
+    #[async_std::test]
+    async fn lots() {
+        let echo = async_std::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .unwrap();
+        let addr = echo.local_addr().unwrap();
+
+        async_std::task::spawn(async move {
+            let (stream, _) = echo.accept().await.unwrap();
+            let mut stream = AsyncBincodeStream::<_, usize, usize, _>::from(stream).for_async();
+            while let Some(item) = stream.next().await {
+                stream.send(item.unwrap()).await.unwrap();
+            }
+        });
+
+        let n = 81920;
+        let stream = async_std::net::TcpStream::connect(&addr).await.unwrap();
+        let mut c = AsyncBincodeStream::from(stream).for_async();
+
+        ::futures::stream::iter(0usize..n)
+            .map(Ok)
+            .forward(&mut c)
+            .await
+            .unwrap();
+
+        c.get_mut()
+            .shutdown(async_std::net::Shutdown::Write)
+            .unwrap();
+
+        let mut at = 0;
+        while let Some(got) = c.next().await.transpose().unwrap() {
+            assert_eq!(at, got);
+            at += 1;
+        }
+        assert_eq!(at, n);
+    }
+}
+
+#[cfg(all(test, feature = "tokio"))]
+mod tokio_tests {
+    use crate::tokio::*;
     use futures::prelude::*;
     use tokio::io::AsyncWriteExt;
 
@@ -66,7 +150,7 @@ mod tests {
         let stream = tokio::net::TcpStream::connect(&addr).await.unwrap();
         let mut c = AsyncBincodeStream::from(stream).for_async();
 
-        futures::stream::iter(0usize..n)
+        ::futures::stream::iter(0usize..n)
             .map(Ok)
             .forward(&mut c)
             .await
