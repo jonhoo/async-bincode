@@ -156,7 +156,11 @@ mod tokio_tests {
             .await
             .unwrap();
 
-        c.get_mut().shutdown().await.unwrap();
+        let r = c.get_mut().shutdown().await;
+        if !cfg!(target_os = "macos") {
+            // https://github.com/tokio-rs/tokio/issues/4665
+            r.unwrap();
+        }
 
         let mut at = 0;
         while let Some(got) = c.next().await.transpose().unwrap() {
