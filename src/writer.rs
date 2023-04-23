@@ -178,11 +178,18 @@ macro_rules! make_writer {
             }
 
             fn poll_close(
-                mut self: std::pin::Pin<&mut Self>,
+                self: std::pin::Pin<&mut Self>,
                 cx: &mut std::task::Context,
             ) -> std::task::Poll<Result<(), Self::Error>> {
-                futures_core::ready!(self.as_mut().poll_flush(cx))?;
-                std::pin::Pin::new(&mut self.writer)
+                // allow us to borrow fields separately
+                let mut this = self.get_mut();
+
+                // only flush if needed, this condition prevents us from calling flush after close
+                if !this.buffer.is_empty() {
+                    futures_core::ready!(std::pin::Pin::new(&mut this).poll_flush(cx))?;
+                }
+
+                std::pin::Pin::new(&mut this.writer)
                     .$poll_close_method(cx)
                     .map_err(bincode::Error::from)
             }
