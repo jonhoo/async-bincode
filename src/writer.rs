@@ -154,6 +154,14 @@ macro_rules! make_writer {
             }
 
             fn start_send(mut self: std::pin::Pin<&mut Self>, item: T) -> Result<(), Self::Error> {
+                // NOTE: in theory we could have a short-circuit here that tries to have bincode write
+                // directly into self.writer. this would be way more efficient in the common case as we
+                // don't have to do the extra buffering. the idea would be to serialize fist, and *if*
+                // it errors, see how many bytes were written, serialize again into a Vec, and then
+                // keep only the bytes following the number that were written in our buffer.
+                // unfortunately, bincode will not tell us that number at the moment, and instead just
+                // fail.
+
                 self.append(item)?;
                 Ok(())
             }
