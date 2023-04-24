@@ -135,28 +135,6 @@ macro_rules! make_writer {
 
             fn poll_ready(
                 self: std::pin::Pin<&mut Self>,
-                _: &mut std::task::Context,
-            ) -> std::task::Poll<Result<(), Self::Error>> {
-                std::task::Poll::Ready(Ok(()))
-            }
-
-            fn start_send(mut self: std::pin::Pin<&mut Self>, item: T) -> Result<(), Self::Error> {
-                if self.buffer.is_empty() {
-                    // NOTE: in theory we could have a short-circuit here that tries to have bincode write
-                    // directly into self.writer. this would be way more efficient in the common case as we
-                    // don't have to do the extra buffering. the idea would be to serialize fist, and *if*
-                    // it errors, see how many bytes were written, serialize again into a Vec, and then
-                    // keep only the bytes following the number that were written in our buffer.
-                    // unfortunately, bincode will not tell us that number at the moment, and instead just
-                    // fail.
-                }
-
-                self.append(item)?;
-                Ok(())
-            }
-
-            fn poll_flush(
-                self: std::pin::Pin<&mut Self>,
                 cx: &mut std::task::Context,
             ) -> std::task::Poll<Result<(), Self::Error>> {
                 // allow us to borrow fields separately
@@ -169,27 +147,32 @@ macro_rules! make_writer {
                     this.written += n;
                 }
 
-                // we have to flush before we're really done
+                // cleanup the buffer
                 this.buffer.clear();
                 this.written = 0;
-                std::pin::Pin::new(&mut this.writer)
+                std::task::Poll::Ready(Ok(()))
+            }
+
+            fn start_send(mut self: std::pin::Pin<&mut Self>, item: T) -> Result<(), Self::Error> {
+                self.append(item)?;
+                Ok(())
+            }
+
+            fn poll_flush(
+                mut self: std::pin::Pin<&mut Self>,
+                cx: &mut std::task::Context,
+            ) -> std::task::Poll<Result<(), Self::Error>> {
+                std::pin::Pin::new(&mut self.writer)
                     .poll_flush(cx)
                     .map_err(bincode::Error::from)
             }
 
             fn poll_close(
-                self: std::pin::Pin<&mut Self>,
+                mut self: std::pin::Pin<&mut Self>,
                 cx: &mut std::task::Context,
             ) -> std::task::Poll<Result<(), Self::Error>> {
-                // allow us to borrow fields separately
-                let mut this = self.get_mut();
-
-                // only flush if needed, this condition prevents us from calling flush after close
-                if !this.buffer.is_empty() {
-                    futures_core::ready!(std::pin::Pin::new(&mut this).poll_flush(cx))?;
-                }
-
-                std::pin::Pin::new(&mut this.writer)
+                futures_core::ready!(self.as_mut().poll_ready(cx))?;
+                std::pin::Pin::new(&mut self.writer)
                     .$poll_close_method(cx)
                     .map_err(bincode::Error::from)
             }
