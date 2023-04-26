@@ -182,7 +182,13 @@ macro_rules! make_writer {
                 mut self: std::pin::Pin<&mut Self>,
                 cx: &mut std::task::Context,
             ) -> std::task::Poll<Result<(), Self::Error>> {
+                // `poll_ready` in `poll_close` is fine because in order to get to the first call to `poll_close`,
+                // we must have already emptied the buffer, and thus the call to `poll_ready` must no longer
+                // be calling `poll_write` on the underlying writer on re-entry.
                 futures_core::ready!(self.as_mut().poll_ready(cx))?;
+
+                // according to the `Sink` documentation, calling `poll_close` implies `poll_flush`, so
+                // explicitly calling `poll_flush` is not needed here.
                 std::pin::Pin::new(&mut self.writer)
                     .$poll_close_method(cx)
                     .map_err(bincode::Error::from)
