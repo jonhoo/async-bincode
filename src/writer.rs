@@ -9,6 +9,9 @@ macro_rules! make_writer {
         #[doc=concat!("[`", stringify!($write_trait), "`],")]
         /// and then use [`futures_sink::Sink`] to send values.
         ///
+        /// Important: Only one element at a time is written to the output writer. It is recommended
+        /// to use a `BufWriter` in front of the output to batch write operations to the underlying writer.
+        ///
         /// Note that an `AsyncBincodeWriter` must be of the type [`AsyncDestination`] in order to be
         /// compatible with an [`AsyncBincodeReader`] on the remote end (recall that it requires the
         /// serialized size prefixed to the serialized data). The default is [`SyncDestination`], but these

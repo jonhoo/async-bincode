@@ -15,4 +15,6 @@ work, it relies on the sender to prefix each encoded element with its encoded si
 [`serialize_into`] for a convenience method that provides this.
 
 On the write side, `async-bincode` buffers the serialized values, and asynchronously sends the
-resulting bytestream.
+resulting bytestream. **Important:** Only one element at a time is written to the output writer. 
+It is recommended to use a BufWriter in front of the output to batch write operations to the
+underlying writer.
