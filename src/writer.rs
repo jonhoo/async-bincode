@@ -173,6 +173,7 @@ macro_rules! make_writer {
                 mut self: std::pin::Pin<&mut Self>,
                 cx: &mut std::task::Context,
             ) -> std::task::Poll<Result<(), Self::Error>> {
+                futures_core::ready!(self.as_mut().poll_ready(cx))?;
                 std::pin::Pin::new(&mut self.writer)
                     .poll_flush(cx)
                     .map_err(bincode::Error::from)
