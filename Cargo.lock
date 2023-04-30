@@ -14,7 +14,7 @@ dependencies = [
 
 [[package]]
 name = "async-bincode"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "async-std",
  "bincode",
