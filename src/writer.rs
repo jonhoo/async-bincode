@@ -9,6 +9,9 @@ macro_rules! make_writer {
         #[doc=concat!("[`", stringify!($write_trait), "`],")]
         /// and then use [`futures_sink::Sink`] to send values.
         ///
+        /// Important: Only one element at a time is written to the output writer. It is recommended
+        /// to use a `BufWriter` in front of the output to batch write operations to the underlying writer.
+        ///
         /// Note that an `AsyncBincodeWriter` must be of the type [`AsyncDestination`] in order to be
         /// compatible with an [`AsyncBincodeReader`] on the remote end (recall that it requires the
         /// serialized size prefixed to the serialized data). The default is [`SyncDestination`], but these
@@ -135,28 +138,6 @@ macro_rules! make_writer {
 
             fn poll_ready(
                 self: std::pin::Pin<&mut Self>,
-                _: &mut std::task::Context,
-            ) -> std::task::Poll<Result<(), Self::Error>> {
-                std::task::Poll::Ready(Ok(()))
-            }
-
-            fn start_send(mut self: std::pin::Pin<&mut Self>, item: T) -> Result<(), Self::Error> {
-                if self.buffer.is_empty() {
-                    // NOTE: in theory we could have a short-circuit here that tries to have bincode write
-                    // directly into self.writer. this would be way more efficient in the common case as we
-                    // don't have to do the extra buffering. the idea would be to serialize fist, and *if*
-                    // it errors, see how many bytes were written, serialize again into a Vec, and then
-                    // keep only the bytes following the number that were written in our buffer.
-                    // unfortunately, bincode will not tell us that number at the moment, and instead just
-                    // fail.
-                }
-
-                self.append(item)?;
-                Ok(())
-            }
-
-            fn poll_flush(
-                self: std::pin::Pin<&mut Self>,
                 cx: &mut std::task::Context,
             ) -> std::task::Poll<Result<(), Self::Error>> {
                 // allow us to borrow fields separately
@@ -169,10 +150,31 @@ macro_rules! make_writer {
                     this.written += n;
                 }
 
-                // we have to flush before we're really done
+                // cleanup the buffer
                 this.buffer.clear();
                 this.written = 0;
-                std::pin::Pin::new(&mut this.writer)
+                std::task::Poll::Ready(Ok(()))
+            }
+
+            fn start_send(mut self: std::pin::Pin<&mut Self>, item: T) -> Result<(), Self::Error> {
+                // NOTE: in theory we could have a short-circuit here that tries to have bincode write
+                // directly into self.writer. this would be way more efficient in the common case as we
+                // don't have to do the extra buffering. the idea would be to serialize fist, and *if*
+                // it errors, see how many bytes were written, serialize again into a Vec, and then
+                // keep only the bytes following the number that were written in our buffer.
+                // unfortunately, bincode will not tell us that number at the moment, and instead just
+                // fail.
+
+                self.append(item)?;
+                Ok(())
+            }
+
+            fn poll_flush(
+                mut self: std::pin::Pin<&mut Self>,
+                cx: &mut std::task::Context,
+            ) -> std::task::Poll<Result<(), Self::Error>> {
+                futures_core::ready!(self.as_mut().poll_ready(cx))?;
+                std::pin::Pin::new(&mut self.writer)
                     .poll_flush(cx)
                     .map_err(bincode::Error::from)
             }
@@ -181,7 +183,13 @@ macro_rules! make_writer {
                 mut self: std::pin::Pin<&mut Self>,
                 cx: &mut std::task::Context,
             ) -> std::task::Poll<Result<(), Self::Error>> {
-                futures_core::ready!(self.as_mut().poll_flush(cx))?;
+                // in order to get to the first call to `poll_close`, `poll_ready` must have already
+                // finished and emptied the buffer. thus the call to `poll_ready` will no longer be calling
+                // `poll_write` on the underlying writer on re-entry.
+                futures_core::ready!(self.as_mut().poll_ready(cx))?;
+
+                // `futures::Sink:poll_close` documentation states that calling `poll_close` implies
+                // `poll_flush`, so explicitly calling `poll_flush` is not needed here.
                 std::pin::Pin::new(&mut self.writer)
                     .$poll_close_method(cx)
                     .map_err(bincode::Error::from)

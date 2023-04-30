@@ -105,7 +105,7 @@ mod futures_tests {
 mod tokio_tests {
     use crate::tokio::*;
     use futures::prelude::*;
-    use tokio::io::AsyncWriteExt;
+    use tokio::io::{AsyncWriteExt, BufStream};
 
     #[tokio::test]
     async fn it_works() {
@@ -137,14 +137,15 @@ mod tokio_tests {
 
         tokio::spawn(async move {
             let (stream, _) = echo.accept().await.unwrap();
-            let mut stream = AsyncBincodeStream::<_, usize, usize, _>::from(stream).for_async();
-            let (r, w) = stream.tcp_split();
+            let stream =
+                AsyncBincodeStream::<_, usize, usize, _>::from(BufStream::new(stream)).for_async();
+            let (w, r) = stream.split();
             r.forward(w).await.unwrap();
         });
 
         let n = 81920;
         let stream = tokio::net::TcpStream::connect(&addr).await.unwrap();
-        let mut c = AsyncBincodeStream::from(stream).for_async();
+        let mut c = AsyncBincodeStream::from(BufStream::new(stream)).for_async();
 
         ::futures::stream::iter(0usize..n)
             .map(Ok)
