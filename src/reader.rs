@@ -20,7 +20,7 @@ macro_rules! make_reader {
         ///
         /// Note that the sender *must* prefix each serialized item with its size as reported by
         /// `bincode::serialized_size` encoded as a four-byte network-endian encoded. See also
-        /// [`serialize_into`], which does this for you.
+        /// [`bincode::serialize_into`], which does this for you.
         #[derive(Debug)]
         pub struct AsyncBincodeReader<R, T>(crate::reader::AsyncBincodeReader<R, T>);
 
