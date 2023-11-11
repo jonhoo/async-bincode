@@ -11,10 +11,11 @@ from stream errors while encoding or decoding](https://github.com/TyOverby/binco
 
 `async-bincode` works around that on the receive side by buffering received bytes until a full
 element's worth of data has been received, and only then calling into bincode. To make this
-work, it relies on the sender to prefix each encoded element with its encoded size. See
-[`serialize_into`] for a convenience method that provides this.
+work, it relies on the sender to prefix each encoded element with its encoded size.
 
 On the write side, `async-bincode` buffers the serialized values, and asynchronously sends the
-resulting bytestream. **Important:** Only one element at a time is written to the output writer. 
+resulting bytestream. **Important:** Only one element at a time is written to the output writer.
 It is recommended to use a BufWriter in front of the output to batch write operations to the
-underlying writer.
+underlying writer. The marker trait `AsyncDestination` can be used to automatically add the
+length prefix required by an `async-bincode` receiver.
+

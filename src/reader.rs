@@ -19,8 +19,9 @@ macro_rules! make_reader {
         /// and then use [`futures_core::Stream`] to access the deserialized values.
         ///
         /// Note that the sender *must* prefix each serialized item with its size as reported by
-        /// `bincode::serialized_size` encoded as a four-byte network-endian encoded. See also
-        /// [`serialize_into`], which does this for you.
+        /// [`bincode::serialized_size`] encoded as a four-byte network-endian encoded. Use the
+        /// marker trait [`AsyncDestination`] to add it automatically when using
+        /// [`AsyncBincodeWriter`].
         #[derive(Debug)]
         pub struct AsyncBincodeReader<R, T>(crate::reader::AsyncBincodeReader<R, T>);
 
