@@ -29,14 +29,19 @@ macro_rules! make_reader {
 
         impl<R, T> Default for AsyncBincodeReader<R, T>
         where
-            R: Default,
+            for<'a> T: ::serde::Deserialize<'a>,
+            R: Default + $read_trait + Unpin,
         {
             fn default() -> Self {
                 Self::from(R::default())
             }
         }
 
-        impl<R, T> From<R> for AsyncBincodeReader<R, T> {
+        impl<R, T> From<R> for AsyncBincodeReader<R, T>
+        where
+            for<'a> T: ::serde::Deserialize<'a>,
+            R: $read_trait + Unpin,
+        {
             fn from(reader: R) -> Self {
                 Self(crate::reader::AsyncBincodeReader {
                     buffer: ::bytes::BytesMut::with_capacity(8192),

@@ -29,7 +29,8 @@ macro_rules! make_writer {
 
         impl<W, T> Default for AsyncBincodeWriter<W, T, SyncDestination>
         where
-            W: Default,
+            T: serde::Serialize,
+            W: Default + $write_trait + Unpin,
         {
             fn default() -> Self {
                 Self::from(W::default())
@@ -59,7 +60,11 @@ macro_rules! make_writer {
             }
         }
 
-        impl<W, T> From<W> for AsyncBincodeWriter<W, T, SyncDestination> {
+        impl<W, T> From<W> for AsyncBincodeWriter<W, T, SyncDestination>
+        where
+            T: serde::Serialize,
+            W: $write_trait + Unpin,
+        {
             fn from(writer: W) -> Self {
                 Self {
                     buffer: Vec::new(),

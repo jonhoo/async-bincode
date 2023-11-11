@@ -49,12 +49,19 @@ impl<R, W, D> AsyncBincodeStream<tokio::net::TcpStream, R, W, D> {
         // Now split the stream
         let (r, w) = writer.get_mut().split();
         // Then put the reader back together
-        let mut reader = AsyncBincodeReader::from(r);
-        reader.0.buffer = rbuff;
+        let reader = AsyncBincodeReader(crate::reader::AsyncBincodeReader {
+            buffer: rbuff,
+            reader: r,
+            into: std::marker::PhantomData,
+        });
         // And then the writer
-        let mut writer: AsyncBincodeWriter<_, _, D> = AsyncBincodeWriter::from(w).make_for();
-        writer.buffer = wbuff;
-        writer.written = wsize;
+        let writer: AsyncBincodeWriter<_, _, D> = AsyncBincodeWriter {
+            buffer: wbuff,
+            writer: w,
+            written: wsize,
+            dest: std::marker::PhantomData,
+            from: std::marker::PhantomData,
+        };
         // All good!
         (reader, writer)
     }

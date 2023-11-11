@@ -28,7 +28,9 @@ macro_rules! make_stream {
 
         impl<S, R, W> Default for AsyncBincodeStream<S, R, W, SyncDestination>
         where
-            S: Default,
+            S: Default + $read_trait + $write_trait + Unpin,
+            for<'a> R: ::serde::Deserialize<'a>,
+            W: ::serde::Serialize,
         {
             fn default() -> Self {
                 Self::from(S::default())
@@ -59,7 +61,12 @@ macro_rules! make_stream {
             }
         }
 
-        impl<S, R, W> From<S> for AsyncBincodeStream<S, R, W, SyncDestination> {
+        impl<S, R, W> From<S> for AsyncBincodeStream<S, R, W, SyncDestination>
+        where
+            S: $read_trait + $write_trait + Unpin,
+            for<'a> R: ::serde::Deserialize<'a>,
+            W: ::serde::Serialize,
+        {
             fn from(stream: S) -> Self {
                 AsyncBincodeStream {
                     stream: AsyncBincodeReader::from(InternalAsyncWriter(
@@ -74,19 +81,45 @@ macro_rules! make_stream {
             ///
             /// This is necessary for compatability with a remote [`AsyncBincodeReader`].
             pub fn for_async(self) -> AsyncBincodeStream<S, R, W, crate::AsyncDestination> {
-                let stream = self.into_inner();
-                AsyncBincodeStream {
-                    stream: AsyncBincodeReader::from(InternalAsyncWriter(
-                        AsyncBincodeWriter::from(stream).for_async(),
-                    )),
-                }
+                self.make_for()
             }
 
             /// Make this stream only send bincode-encoded values.
             ///
             /// This is necessary for compatability with stock `bincode` receivers.
             pub fn for_sync(self) -> AsyncBincodeStream<S, R, W, crate::SyncDestination> {
-                AsyncBincodeStream::from(self.into_inner())
+                self.make_for()
+            }
+        }
+
+        impl<S, R, W, D> AsyncBincodeStream<S, R, W, D> {
+            pub(crate) fn make_for<D2>(self) -> AsyncBincodeStream<S, R, W, D2> {
+                let crate::reader::AsyncBincodeReader {
+                    buffer: r_buf,
+                    reader:
+                        InternalAsyncWriter(AsyncBincodeWriter {
+                            buffer: w_buf,
+                            writer,
+                            written,
+                            from: _,
+                            dest: _,
+                        }),
+                    into: _,
+                } = self.stream.0;
+
+                AsyncBincodeStream {
+                    stream: AsyncBincodeReader(crate::reader::AsyncBincodeReader {
+                        buffer: r_buf,
+                        reader: InternalAsyncWriter(AsyncBincodeWriter {
+                            buffer: w_buf,
+                            writer,
+                            written,
+                            from: std::marker::PhantomData,
+                            dest: std::marker::PhantomData,
+                        }),
+                        into: std::marker::PhantomData,
+                    }),
+                }
             }
         }
 
