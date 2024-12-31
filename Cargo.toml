@@ -36,7 +36,12 @@ serde = "1.0.8"
 tokio = { version = "1.0", features = ["net"], optional = true }
 bytes = "1.0"
 
+# to make -Zminimal-versions work
+[target.'cfg(any())'.dependencies]
+async-global-executor = { version = "2.4.1", optional = true }
+async-executor = { version = "1.9.0", optional = true }
+
 [dev-dependencies]
-async-std = { version = "1.11.0", features = ["attributes"] }
+async-std = { version = "1.13.0", features = ["attributes"] }
 futures = "0.3.0"
 tokio = { version = "1.0", features = ["full"] }
