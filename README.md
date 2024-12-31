@@ -2,6 +2,7 @@
 
 [![Crates.io](https://img.shields.io/crates/v/async-bincode.svg)](https://crates.io/crates/async-bincode)
 [![Documentation](https://docs.rs/async-bincode/badge.svg)](https://docs.rs/async-bincode/)
+[![codecov](https://codecov.io/gh/jonhoo/async-bincode/graph/badge.svg?token=8MgydjsaLM)](https://codecov.io/gh/jonhoo/async-bincode)
 
 Asynchronous access to a bincode-encoded item stream.
 
