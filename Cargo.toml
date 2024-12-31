@@ -37,6 +37,6 @@ tokio = { version = "1.0", features = ["net"], optional = true }
 bytes = "1.0"
 
 [dev-dependencies]
-async-std = { version = "1.11.0", features = ["attributes"] }
+async-std = { version = "1.13.0", features = ["attributes"] }
 futures = "0.3.0"
 tokio = { version = "1.0", features = ["full"] }
