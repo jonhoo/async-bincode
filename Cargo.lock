@@ -29,7 +29,7 @@ dependencies = [
 
 [[package]]
 name = "async-bincode"
-version = "0.7.2"
+version = "0.7.3"
 dependencies = [
  "async-executor",
  "async-global-executor",
