@@ -182,7 +182,9 @@ where
                                 if self.buffer.is_empty() {
                                     return Poll::Ready(Ok(FillResult::EOF));
                                 } else {
-                                    return Poll::Ready(Err(io::Error::from(io::ErrorKind::BrokenPipe)));
+                                    return Poll::Ready(Err(io::Error::from(
+                                        io::ErrorKind::BrokenPipe,
+                                    )));
                                 }
                             }
 
