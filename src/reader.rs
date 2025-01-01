@@ -174,18 +174,39 @@ where
         unsafe { rest.set_len(max) };
 
         while self.buffer.len() < target_size {
-            let n = ready!(poll_reader(Pin::new(&mut self.reader), cx, &mut rest[..]))?;
-            if n == 0 {
-                if self.buffer.is_empty() {
-                    return Poll::Ready(Ok(FillResult::EOF));
-                } else {
-                    return Poll::Ready(Err(io::Error::from(io::ErrorKind::BrokenPipe)));
+            match poll_reader(Pin::new(&mut self.reader), cx, &mut rest[..]) {
+                Poll::Ready(result) => {
+                    match result {
+                        Ok(n) => {
+                            if n == 0 {
+                                if self.buffer.is_empty() {
+                                    return Poll::Ready(Ok(FillResult::EOF));
+                                } else {
+                                    return Poll::Ready(Err(io::Error::from(
+                                        io::ErrorKind::BrokenPipe,
+                                    )));
+                                }
+                            }
+
+                            // adopt the new bytes
+                            let read = rest.split_to(n);
+                            self.buffer.unsplit(read);
+                        }
+                        Err(err) => {
+                            // reading failed, put the buffer back
+                            rest.truncate(0);
+                            self.buffer.unsplit(rest);
+                            return Poll::Ready(Err(err));
+                        }
+                    }
+                }
+                Poll::Pending => {
+                    // reading in progress, put the buffer back
+                    rest.truncate(0);
+                    self.buffer.unsplit(rest);
+                    return Poll::Pending;
                 }
             }
-
-            // adopt the new bytes
-            let read = rest.split_to(n);
-            self.buffer.unsplit(read);
         }
 
         Poll::Ready(Ok(FillResult::Filled))
