@@ -32,7 +32,7 @@ byteorder = "1.0.0"
 futures-core = "0.3.0"
 futures-io = { version = "0.3.21", optional = true }
 futures-sink = "0.3.0"
-serde = "1.0.8"
+serde = "1.0.100"
 tokio = { version = "1.0", features = ["net"], optional = true }
 bytes = "1.0"
 
