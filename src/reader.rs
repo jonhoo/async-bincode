@@ -1,4 +1,4 @@
-use bincode::Options;
+use bincode::config;
 use byteorder::{ByteOrder, NetworkEndian};
 use bytes::buf::Buf;
 use bytes::BytesMut;
@@ -81,7 +81,7 @@ macro_rules! make_reader {
             for<'a> T: ::serde::Deserialize<'a>,
             R: $read_trait + Unpin,
         {
-            type Item = Result<T, bincode::Error>;
+            type Item = Result<T, bincode::error::DecodeError>;
             fn poll_next(
                 mut self: std::pin::Pin<&mut Self>,
                 cx: &mut std::task::Context,
@@ -103,7 +103,7 @@ impl<R, T> Unpin for AsyncBincodeReader<R, T> where R: Unpin {}
 
 enum FillResult {
     Filled,
-    EOF,
+    Eof,
 }
 
 impl<R: Unpin, T> AsyncBincodeReader<R, T>
@@ -114,15 +114,16 @@ where
         mut self: Pin<&mut Self>,
         cx: &mut Context,
         poll_reader: F,
-    ) -> Poll<Option<Result<T, bincode::Error>>>
+    ) -> Poll<Option<Result<T, bincode::error::DecodeError>>>
     where
         F: Fn(Pin<&mut R>, &mut Context, &mut [u8]) -> Poll<Result<usize, io::Error>> + Copy,
     {
-        if let FillResult::EOF = ready!(self
-            .as_mut()
-            .fill(cx, 5, poll_reader)
-            .map_err(bincode::Error::from))?
-        {
+        if let FillResult::Eof = ready!(self.as_mut().fill(cx, 5, poll_reader).map_err(|inner| {
+            bincode::error::DecodeError::Io {
+                inner,
+                additional: 4,
+            }
+        }))? {
             return Poll::Ready(None);
         }
 
@@ -133,13 +134,23 @@ where
         ready!(self
             .as_mut()
             .fill(cx, target_buffer_size + 4, poll_reader)
-            .map_err(bincode::Error::from))?;
+            .map_err(|inner| {
+                bincode::error::DecodeError::Io {
+                    inner,
+                    additional: target_buffer_size,
+                }
+            }))?;
 
         self.buffer.advance(4);
-        let message = bincode::options()
-            .with_limit(u32::max_value() as u64)
-            .allow_trailing_bytes()
-            .deserialize(&self.buffer[..target_buffer_size])?;
+        let (message, decoded) = bincode::serde::decode_from_slice(
+            &self.buffer[..target_buffer_size],
+            config::standard().with_limit::<{ u32::MAX as usize }>(),
+        )?;
+        if decoded != target_buffer_size {
+            return Poll::Ready(Some(Err(bincode::error::DecodeError::OtherString(
+                format!("only decoded {decoded} out of {target_buffer_size}-length message"),
+            ))));
+        }
         self.buffer.advance(target_buffer_size);
         Poll::Ready(Some(Ok(message)))
     }
@@ -180,7 +191,7 @@ where
                         Ok(n) => {
                             if n == 0 {
                                 if self.buffer.is_empty() {
-                                    return Poll::Ready(Ok(FillResult::EOF));
+                                    return Poll::Ready(Ok(FillResult::Eof));
                                 } else {
                                     return Poll::Ready(Err(io::Error::from(
                                         io::ErrorKind::BrokenPipe,
