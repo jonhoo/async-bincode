@@ -87,6 +87,7 @@ mod futures_tests {
             .await
             .unwrap();
 
+        c.get_mut().flush().await.unwrap();
         c.get_mut().shutdown(smol::net::Shutdown::Write).unwrap();
 
         let mut at = 0;
