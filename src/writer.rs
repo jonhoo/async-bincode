@@ -105,15 +105,25 @@ macro_rules! make_writer {
         where
             T: serde::Serialize,
         {
-            fn append(&mut self, item: T) -> Result<(), bincode::Error> {
-                use bincode::Options;
+            fn append(&mut self, item: T) -> Result<(), bincode::error::EncodeError> {
+                use bincode::config;
                 use byteorder::{NetworkEndian, WriteBytesExt};
-                let c = bincode::options()
-                    .with_limit(u32::max_value() as u64)
-                    .allow_trailing_bytes();
-                let size = c.serialized_size(&item)? as u32;
-                self.buffer.write_u32::<NetworkEndian>(size)?;
-                c.serialize_into(&mut self.buffer, &item)
+                let rewrite_at = self.buffer.len();
+                self.buffer
+                    .write_u32::<NetworkEndian>(0)
+                    .map_err(|inner| bincode::error::EncodeError::Io { inner, index: 0 })?;
+                let written = bincode::serde::encode_into_std_write(
+                    &item,
+                    &mut self.buffer,
+                    config::standard().with_limit::<{ u32::max_value() as usize }>(),
+                )?;
+                (&mut self.buffer[rewrite_at..])
+                    .write_u32::<NetworkEndian>(written as u32)
+                    .map_err(|inner| bincode::error::EncodeError::Io {
+                        inner,
+                        index: written,
+                    })?;
+                Ok(())
             }
         }
 
@@ -121,10 +131,13 @@ macro_rules! make_writer {
         where
             T: serde::Serialize,
         {
-            fn append(&mut self, item: T) -> Result<(), bincode::Error> {
-                use bincode::Options;
-                let c = bincode::options().allow_trailing_bytes();
-                c.serialize_into(&mut self.buffer, &item)
+            fn append(&mut self, item: T) -> Result<(), bincode::error::EncodeError> {
+                bincode::serde::encode_into_std_write(
+                    item,
+                    &mut self.buffer,
+                    bincode::config::standard(),
+                )
+                .map(|_| ())
             }
         }
 
@@ -134,7 +147,7 @@ macro_rules! make_writer {
             W: $write_trait + Unpin,
             Self: BincodeWriterFor<T>,
         {
-            type Error = bincode::Error;
+            type Error = bincode::error::EncodeError;
 
             fn poll_ready(
                 self: std::pin::Pin<&mut Self>,
@@ -146,7 +159,11 @@ macro_rules! make_writer {
                 // write stuff out if we need to
                 while this.written != this.buffer.len() {
                     let n = futures_core::ready!(std::pin::Pin::new(&mut this.writer)
-                        .poll_write(cx, &this.buffer[this.written..]))?;
+                        .poll_write(cx, &this.buffer[this.written..]))
+                    .map_err(|inner| bincode::error::EncodeError::Io {
+                        inner,
+                        index: this.written,
+                    })?;
                     this.written += n;
                 }
 
@@ -176,7 +193,10 @@ macro_rules! make_writer {
                 futures_core::ready!(self.as_mut().poll_ready(cx))?;
                 std::pin::Pin::new(&mut self.writer)
                     .poll_flush(cx)
-                    .map_err(bincode::Error::from)
+                    .map_err(|inner| bincode::error::EncodeError::Io {
+                        inner,
+                        index: self.written,
+                    })
             }
 
             fn poll_close(
@@ -192,7 +212,10 @@ macro_rules! make_writer {
                 // `poll_flush`, so explicitly calling `poll_flush` is not needed here.
                 std::pin::Pin::new(&mut self.writer)
                     .$poll_close_method(cx)
-                    .map_err(bincode::Error::from)
+                    .map_err(|inner| bincode::error::EncodeError::Io {
+                        inner,
+                        index: self.written,
+                    })
             }
         }
     };
@@ -208,5 +231,5 @@ pub struct SyncDestination;
 
 #[doc(hidden)]
 pub trait BincodeWriterFor<T> {
-    fn append(&mut self, item: T) -> Result<(), bincode::Error>;
+    fn append(&mut self, item: T) -> Result<(), bincode::error::EncodeError>;
 }

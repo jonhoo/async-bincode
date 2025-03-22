@@ -119,9 +119,9 @@ macro_rules! make_stream {
         where
             S: Unpin,
             AsyncBincodeReader<InternalAsyncWriter<S, W, D>, R>:
-                futures_core::Stream<Item = Result<R, bincode::Error>>,
+                futures_core::Stream<Item = Result<R, bincode::error::DecodeError>>,
         {
-            type Item = Result<R, bincode::Error>;
+            type Item = Result<R, bincode::error::DecodeError>;
             fn poll_next(
                 mut self: std::pin::Pin<&mut Self>,
                 cx: &mut std::task::Context,
@@ -133,9 +133,9 @@ macro_rules! make_stream {
         impl<S, R, W, D> futures_sink::Sink<W> for AsyncBincodeStream<S, R, W, D>
         where
             S: Unpin,
-            AsyncBincodeWriter<S, W, D>: futures_sink::Sink<W, Error = bincode::Error>,
+            AsyncBincodeWriter<S, W, D>: futures_sink::Sink<W, Error = bincode::error::EncodeError>,
         {
-            type Error = bincode::Error;
+            type Error = bincode::error::EncodeError;
 
             fn poll_ready(
                 mut self: std::pin::Pin<&mut Self>,
