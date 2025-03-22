@@ -140,6 +140,7 @@ mod tokio_tests {
 
         let tokio = tokio::runtime::Runtime::new().unwrap();
         let server = tokio.spawn(async move {
+            echo.set_nonblocking(true).unwrap();
             let echo = tokio::net::TcpListener::from_std(echo).unwrap();
             let (stream, _) = echo.accept().await.unwrap();
             let mut w = AsyncBincodeWriter::<_, i32, _>::from(stream);
