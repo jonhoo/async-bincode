@@ -115,7 +115,7 @@ macro_rules! make_writer {
                 let written = bincode::serde::encode_into_std_write(
                     &item,
                     &mut self.buffer,
-                    config::standard().with_limit::<{ u32::max_value() as usize }>(),
+                    config::standard().with_limit::<{ u32::MAX as usize }>(),
                 )?;
                 (&mut self.buffer[rewrite_at..])
                     .write_u32::<NetworkEndian>(written as u32)

@@ -103,7 +103,7 @@ impl<R, T> Unpin for AsyncBincodeReader<R, T> where R: Unpin {}
 
 enum FillResult {
     Filled,
-    EOF,
+    Eof,
 }
 
 impl<R: Unpin, T> AsyncBincodeReader<R, T>
@@ -118,7 +118,7 @@ where
     where
         F: Fn(Pin<&mut R>, &mut Context, &mut [u8]) -> Poll<Result<usize, io::Error>> + Copy,
     {
-        if let FillResult::EOF = ready!(self.as_mut().fill(cx, 5, poll_reader).map_err(|inner| {
+        if let FillResult::Eof = ready!(self.as_mut().fill(cx, 5, poll_reader).map_err(|inner| {
             bincode::error::DecodeError::Io {
                 inner,
                 additional: 4,
@@ -144,7 +144,7 @@ where
         self.buffer.advance(4);
         let (message, decoded) = bincode::serde::decode_from_slice(
             &self.buffer[..target_buffer_size],
-            config::standard().with_limit::<{ u32::max_value() as usize }>(),
+            config::standard().with_limit::<{ u32::MAX as usize }>(),
         )?;
         if decoded != target_buffer_size {
             return Poll::Ready(Some(Err(bincode::error::DecodeError::OtherString(
@@ -191,7 +191,7 @@ where
                         Ok(n) => {
                             if n == 0 {
                                 if self.buffer.is_empty() {
-                                    return Poll::Ready(Ok(FillResult::EOF));
+                                    return Poll::Ready(Ok(FillResult::Eof));
                                 } else {
                                     return Poll::Ready(Err(io::Error::from(
                                         io::ErrorKind::BrokenPipe,
