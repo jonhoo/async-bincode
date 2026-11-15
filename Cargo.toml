@@ -42,3 +42,7 @@ smol-macros = "0.1.1"
 macro_rules_attribute = "0.2.0"
 futures = "0.3.0"
 tokio = { version = "1.0", features = ["full"] }
+
+# for minimal-versions
+[target.'cfg(any())'.dependencies]
+async-fs = { version = "2.1.0", optional = true } # through smol, <2.1.0 uses `FutureExt::poll` but allows futures-lite 1.x, which lacks it
